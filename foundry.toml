@@ -2,6 +2,7 @@
 src = 'src'
 out = 'out'
 libs = ['lib']
+solc_version = "0.8.18"
 
 remappings = [
     "@openzeppelin/=lib/openzeppelin-contracts/",
@@ -9,5 +10,8 @@ remappings = [
     "@tokenized-strategy/=lib/tokenized-strategy/src/",
     "@periphery/=lib/tokenized-strategy-periphery/src/",
 ]
+
+[rpc_endpoints]
+polygon = "https://polygon.llamarpc.com"
 
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config
