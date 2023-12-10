@@ -37,12 +37,12 @@ contract USDCStrategy is BaseStrategy {
         IAaveV2(0x8dFf5E27EA6b7AC08EbFdf9eB090F32ee9a30fcf);
     IAaveV3 constant aaveV3 =
         IAaveV3(0x794a61358D6845594F94dc1DB02A252b5b4814aD);
-    ICompound constant compoundUSDC =
+    ICompound constant COMP_USDC =
         ICompound(0xF25212E676D1F7F89Cd72fFEe66158f541246445);
 
-    address constant USDC = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174; // USDC.e
-    address constant AAVE_V2_USDC = 0x1a13F4Ca1d028320A707D99520AbFefca3998b7F; // USDC.e
-    address constant AAVE_V3_USDC = 0x625E7708f30cA75bfd92586e17077590C60eb4cD; // USDC.e
+    address constant USDC = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174;
+    address constant AAVE_V2_USDC = 0x1a13F4Ca1d028320A707D99520AbFefca3998b7F;
+    address constant AAVE_V3_USDC = 0x625E7708f30cA75bfd92586e17077590C60eb4cD;
 
     uint constant COMP100APR = 317100000 * 100;
     uint constant RAY = 1e27;
@@ -56,7 +56,7 @@ contract USDCStrategy is BaseStrategy {
     constructor() BaseStrategy(USDC, "USDC strategy") {
         ERC20(USDC).approve(address(aaveV2), type(uint).max);
         ERC20(USDC).approve(address(aaveV3), type(uint).max);
-        ERC20(USDC).approve(address(compoundUSDC), type(uint).max);
+        ERC20(USDC).approve(address(COMP_USDC), type(uint).max);
 
         highest = _getHighestYield();
         lastExecuted = block.timestamp;
@@ -238,8 +238,8 @@ contract USDCStrategy is BaseStrategy {
         return
             ERC20(USDC).balanceOf(address(this)) +
             min(
-                ERC20(address(compoundUSDC)).balanceOf(address(this)),
-                ERC20(USDC).balanceOf(address(compoundUSDC))
+                ERC20(address(COMP_USDC)).balanceOf(address(this)),
+                ERC20(USDC).balanceOf(address(COMP_USDC))
             ) +
             min(
                 ERC20(AAVE_V2_USDC).balanceOf(address(this)),
@@ -315,10 +315,10 @@ contract USDCStrategy is BaseStrategy {
 
     function recoverERC20(address _token, address _to) external onlyManagement {
         require(
-            _token != USDC ||
-                _token != address(compoundUSDC) ||
-                _token != AAVE_V2_USDC ||
-                _token != AAVE_V2_USDC,
+            _token != USDC &&
+                _token != address(COMP_USDC) &&
+                _token != AAVE_V2_USDC &&
+                _token != AAVE_V3_USDC,
             "!token"
         );
         ERC20(_token).transfer(_to, ERC20(_token).balanceOf(address(this)));
@@ -333,7 +333,7 @@ contract USDCStrategy is BaseStrategy {
         StrategyType _strategy
     ) internal view returns (uint _amount) {
         if (_strategy == StrategyType.COMPOUND)
-            _amount = ERC20(address(compoundUSDC)).balanceOf(address(this));
+            _amount = ERC20(address(COMP_USDC)).balanceOf(address(this));
         else if (_strategy == StrategyType.AAVE_V2)
             _amount = ERC20(AAVE_V2_USDC).balanceOf(address(this));
         else if (_strategy == StrategyType.AAVE_V3)
@@ -342,7 +342,7 @@ contract USDCStrategy is BaseStrategy {
 
     function _deposit(StrategyType _strategy, uint _amount) internal {
         if (_strategy == StrategyType.COMPOUND) {
-            compoundUSDC.supply(USDC, _amount);
+            COMP_USDC.supply(USDC, _amount);
         } else if (_strategy == StrategyType.AAVE_V2) {
             aaveV2.deposit(USDC, _amount, address(this), 0);
         } else if (_strategy == StrategyType.AAVE_V3) {
@@ -352,7 +352,7 @@ contract USDCStrategy is BaseStrategy {
 
     function _withdraw(StrategyType _strategy, uint _amount) internal {
         if (_strategy == StrategyType.COMPOUND) {
-            compoundUSDC.withdraw(USDC, _amount);
+            COMP_USDC.withdraw(USDC, _amount);
         } else if (_strategy == StrategyType.AAVE_V2) {
             aaveV2.withdraw(USDC, _amount, address(this));
         } else if (_strategy == StrategyType.AAVE_V3) {
@@ -364,7 +364,7 @@ contract USDCStrategy is BaseStrategy {
         StrategyType _strategy
     ) internal view returns (bool _active) {
         if (_strategy == StrategyType.COMPOUND) {
-            _active = !compoundUSDC.isSupplyPaused();
+            _active = !COMP_USDC.isSupplyPaused();
         } else if (_strategy == StrategyType.AAVE_V2) {
             uint _data = aaveV2.getReserveData(USDC).configuration.data;
             _active = (((_data >> 56) & 1) == 1) && !(((_data >> 57) & 1) == 1);
@@ -382,15 +382,15 @@ contract USDCStrategy is BaseStrategy {
     function _totalAmounts() internal view returns (uint256 _totalAssets) {
         _totalAssets =
             ERC20(USDC).balanceOf(address(this)) +
-            ERC20(address(compoundUSDC)).balanceOf(address(this)) +
+            ERC20(address(COMP_USDC)).balanceOf(address(this)) +
             ERC20(AAVE_V2_USDC).balanceOf(address(this)) +
             ERC20(AAVE_V3_USDC).balanceOf(address(this));
     }
 
     function _getHighestYield() internal view returns (StrategyType _highest) {
         // compound
-        uint _supplyRate = (compoundUSDC.getSupplyRate(
-            compoundUSDC.getUtilization()
+        uint _supplyRate = (COMP_USDC.getSupplyRate(
+            COMP_USDC.getUtilization()
         ) * RAY) / COMP100APR;
         uint _maxRate = _supplyRate;
         if (_isActive(StrategyType.COMPOUND)) _highest = StrategyType.COMPOUND;

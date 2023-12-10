@@ -3,10 +3,18 @@ pragma solidity ^0.8.18;
 
 import "forge-std/console.sol";
 import "forge-std/console2.sol";
+import {ERC20Mock} from "openzeppelin-contracts/contracts/mocks/ERC20Mock.sol";
 import {OptimizerSetup, ERC20, IStrategyInterface} from "./utils/OptimizerSetup.sol";
 import {USDCStrategy} from "../USDCStrategy.sol";
 
 contract USDCStrategyTest is OptimizerSetup {
+    address[] tokens = [
+        0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
+        0xF25212E676D1F7F89Cd72fFEe66158f541246445,
+        0x1a13F4Ca1d028320A707D99520AbFefca3998b7F,
+        0x625E7708f30cA75bfd92586e17077590C60eb4cD
+    ];
+
     function setUp() public virtual override {
         vm.createSelectFork("polygon");
     }
@@ -305,5 +313,27 @@ contract USDCStrategyTest is OptimizerSetup {
         );
         vm.prank(management);
         strat.deployToMarket(_highest);
+    }
+
+    function test_recoverERC20(uint256 _amount) public {
+        super.setUp();
+        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
+        ERC20Mock mock = new ERC20Mock(
+            "mock",
+            "mock",
+            address(strategy),
+            _amount
+        );
+        USDCStrategy strat = USDCStrategy(address(strategy));
+
+        vm.prank(management);
+        strat.recoverERC20(address(mock), management);
+        assertEq(mock.balanceOf(management), _amount);
+        vm.startPrank(management);
+        for (uint i; i < tokens.length; i++) {
+            vm.expectRevert();
+            strat.recoverERC20(tokens[i], management);
+        }
+        vm.stopPrank();
     }
 }
