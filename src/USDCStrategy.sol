@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.18;
-
+import "forge-std/console.sol";
 import {BaseStrategy, ERC20} from "@tokenized-strategy/BaseStrategy.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "./StrategyHelper.sol";
 import "./interfaces/IAaveV2.sol";
 import "./interfaces/IAaveV3.sol";
 import "./interfaces/ICompound.sol";
+import "./interfaces/IAaveV2InterestStrategy.sol";
+import "./interfaces/IAaveV3InterestStrategy.sol";
+import "./interfaces/IStableDebtToken.sol";
+import "./interfaces/IVariableDebtToken.sol";
 
 // Import interfaces for many popular DeFi projects, or add your own!
 //import "../interfaces/<protocol>/<Interface>.sol";
@@ -23,15 +28,8 @@ import "./interfaces/ICompound.sol";
 
 // NOTE: To implement permissioned functions you can use the onlyManagement, onlyEmergencyAuthorized and onlyKeepers modifiers
 
-contract USDCStrategy is BaseStrategy {
+contract USDCStrategy is BaseStrategy, StrategyHelper {
     using SafeERC20 for ERC20;
-
-    enum StrategyType {
-        IDLE,
-        COMPOUND,
-        AAVE_V2,
-        AAVE_V3
-    }
 
     IAaveV2 constant aaveV2 =
         IAaveV2(0x8dFf5E27EA6b7AC08EbFdf9eB090F32ee9a30fcf);
@@ -44,22 +42,41 @@ contract USDCStrategy is BaseStrategy {
     address constant AAVE_V2_USDC = 0x1a13F4Ca1d028320A707D99520AbFefca3998b7F;
     address constant AAVE_V3_USDC = 0x625E7708f30cA75bfd92586e17077590C60eb4cD;
 
-    uint constant COMP100APR = 317100000 * 100;
-    uint constant RAY = 1e27;
-
+    bool _isKeeperActive;
     uint MAX_CAP_AAVE_V3 = 150_000_000e6;
     uint public lastExecuted;
 
-    StrategyType public highest;
-    bool _isKeeperActive;
+    int _comp_base;
+    int _comp_rsl;
+    int _comp_rsh;
+    int _comp_kink;
+
+    int _base_V2;
+    int _vrs1_V2;
+    int _vrs2_V2;
+    int _opt_V2;
+    int _exc_V2;
+
+    int _base_V3;
+    int _vrs1_V3;
+    int _vrs2_V3;
+    int _opt_V3;
+    int _exc_V3;
+
+    address _aaveV2Strategy;
+    address _aaveV3Strategy;
 
     constructor() BaseStrategy(USDC, "USDC strategy") {
         ERC20(USDC).approve(address(aaveV2), type(uint).max);
         ERC20(USDC).approve(address(aaveV3), type(uint).max);
         ERC20(USDC).approve(address(COMP_USDC), type(uint).max);
 
-        highest = _getHighestYield();
+        _loadAaveV2(aaveV2.getReserveData(USDC).interestRateStrategyAddress);
+        _loadAaveV3(aaveV3.getReserveData(USDC).interestRateStrategyAddress);
+
         lastExecuted = block.timestamp;
+        _isKeeperActive = true;
+        _loadConstants();
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -78,7 +95,7 @@ contract USDCStrategy is BaseStrategy {
      * to deposit in the yield source.
      */
     function _deployFunds(uint256 _amount) internal override {
-        _deposit(highest, _amount);
+        _deposit(_amount);
     }
 
     /**
@@ -103,11 +120,7 @@ contract USDCStrategy is BaseStrategy {
      * @param _amount, The amount of 'asset' to be freed.
      */
     function _freeFunds(uint256 _amount) internal override {
-        // uint _bal = ERC20(USDC).balanceOf(address(this));
-        // if (_bal < _amount) {
-        //     _withdraw(highest, _amount - _bal);
-        // }
-        _withdraw(highest, _amount);
+        // _withdraw(highest, _amount, true);
     }
 
     /**
@@ -236,23 +249,34 @@ contract USDCStrategy is BaseStrategy {
         address
     ) public view override returns (uint256) {
         return
-            ERC20(USDC).balanceOf(address(this)) +
-            min(
-                ERC20(address(COMP_USDC)).balanceOf(address(this)),
-                ERC20(USDC).balanceOf(address(COMP_USDC))
+            _balanceOfToken(T.U) +
+            (
+                _isActive(StrategyType.COMPOUND)
+                    ? min(
+                        _balanceOfToken(T.C),
+                        _balanceOfToken(T.U, address(COMP_USDC))
+                    )
+                    : 0
             ) +
-            min(
-                ERC20(AAVE_V2_USDC).balanceOf(address(this)),
-                ERC20(USDC).balanceOf(address(AAVE_V2_USDC))
+            (
+                _isActive(StrategyType.AAVE_V2)
+                    ? min(
+                        _balanceOfToken(T.A2),
+                        _balanceOfToken(T.U, AAVE_V2_USDC)
+                    )
+                    : 0
             ) +
-            min(
-                ERC20(AAVE_V3_USDC).balanceOf(address(this)),
-                ERC20(USDC).balanceOf(address(AAVE_V3_USDC))
+            (
+                _isActive(StrategyType.AAVE_V3)
+                    ? min(
+                        _balanceOfToken(T.A3),
+                        _balanceOfToken(T.U, AAVE_V3_USDC)
+                    )
+                    : 0
             );
     }
 
-    /**
-     * @dev Optional function for a strategist to override that will
+    /* @dev Optional function for a strategist to override that will
      * allow management to manually withdraw deployed funds from the
      * yield source if a strategy is shutdown.
      *
@@ -274,42 +298,16 @@ contract USDCStrategy is BaseStrategy {
      *
      */
     function _emergencyWithdraw(uint256 _amount) internal override {
-        _withdraw(highest, _amount);
+        _withdraw(_amount);
     }
 
-    function execute() external onlyKeepers {
-        StrategyType _highest = _getHighestYield();
-        if (highest != _highest) {
-            // withdraw
-            uint _amount = _getAmount(highest);
-            if (_amount > 0) _withdraw(highest, _amount);
-            // deposit
-            highest = _highest;
-            lastExecuted = block.timestamp;
-            _amount = ERC20(USDC).balanceOf(address(this));
-            if (_amount > 0) _deposit(_highest, _amount);
-        }
-    }
-
-    function setHighestYield(StrategyType _strategy) external onlyManagement {
-        if (highest != _strategy) {
-            // withdraw
-            uint _amount = _getAmount(highest);
-            if (_amount > 0) _withdraw(highest, _amount);
-            // deposit
-            highest = _strategy;
-            _amount = ERC20(USDC).balanceOf(address(this));
-            if (_amount > 0) _deposit(_strategy, _amount);
-        }
-    }
-
-    function freeFromMarket(StrategyType _strategy) external onlyManagement {
-        uint _amount = _getAmount(_strategy);
-        if (_amount > 0) _withdraw(_strategy, _amount);
+    function freeFromMarket(T _token) external onlyManagement {
+        uint _amount = _balanceOfToken(_token);
+        if (_amount > 0) _withdraw(_amount);
     }
 
     function deployToMarket(StrategyType _strategy) external onlyManagement {
-        uint _amount = ERC20(USDC).balanceOf(address(this));
+        uint _amount = _balanceOfToken(T.U);
         if (_amount > 0) _deposit(_strategy, _amount);
     }
 
@@ -324,20 +322,79 @@ contract USDCStrategy is BaseStrategy {
         ERC20(_token).transfer(_to, ERC20(_token).balanceOf(address(this)));
     }
 
-    function setKepperActive(bool _active) external onlyManagement {
+    function switchKepperActive(bool _active) external onlyManagement {
         require(_isKeeperActive != _active);
         _isKeeperActive = _active;
     }
 
-    function _getAmount(
-        StrategyType _strategy
-    ) internal view returns (uint _amount) {
-        if (_strategy == StrategyType.COMPOUND)
-            _amount = ERC20(address(COMP_USDC)).balanceOf(address(this));
-        else if (_strategy == StrategyType.AAVE_V2)
-            _amount = ERC20(AAVE_V2_USDC).balanceOf(address(this));
-        else if (_strategy == StrategyType.AAVE_V3)
-            _amount = ERC20(AAVE_V3_USDC).balanceOf(address(this));
+    function _deposit(uint _amount) internal {
+        bool _isC = _isActive(StrategyType.COMPOUND);
+        bool _isV2 = _isActive(StrategyType.AAVE_V2);
+        bool _isV3 = _isActive(StrategyType.AAVE_V3);
+
+        uint _totalMarkets;
+        if (_isC) _totalMarkets++;
+        if (_isV2) _totalMarkets++;
+        if (_isV3) _totalMarkets++;
+
+        if (_totalMarkets == 3) {
+            _allocateFundsTo3Markets(_amount);
+        } else if (_totalMarkets == 2) {
+            _allocateFundsTo2Markets(_amount, _isC, _isV2, _isV3);
+        } else if (_totalMarkets == 1) {
+            if (_isC) _deposit(StrategyType.COMPOUND, _amount);
+            else if (_isV2) _deposit(StrategyType.AAVE_V2, _amount);
+            else if (_isV3) _deposit(StrategyType.AAVE_V3, _amount);
+        } else {
+            revert("No Markets Available");
+        }
+    }
+
+    function _balanceOfToken(T _token) internal view returns (uint) {
+        return _balanceOfToken(_token, address(this));
+    }
+
+    function _balanceOfToken(
+        T _token,
+        address _user
+    ) internal view returns (uint _balance) {
+        if (_token == T.U) _balance = ERC20(USDC).balanceOf(_user);
+        else if (_token == T.C)
+            _balance = ERC20(address(COMP_USDC)).balanceOf(_user);
+        else if (_token == T.A2)
+            _balance = ERC20(AAVE_V2_USDC).balanceOf(_user);
+        else if (_token == T.A3)
+            _balance = ERC20(AAVE_V3_USDC).balanceOf(_user);
+    }
+
+    function _withdraw(uint _amount) internal {
+        bool _isC = _isActive(StrategyType.COMPOUND);
+        bool _isV2 = _isActive(StrategyType.AAVE_V2);
+        bool _isV3 = _isActive(StrategyType.AAVE_V3);
+        uint _amt;
+        // option 1
+        ERC20(AAVE_V3_USDC).balanceOf(address(this));
+
+        // option 2
+        uint _totalMarkets;
+        if (_isC) _totalMarkets++;
+        if (_isV2) _totalMarkets++;
+        if (_isV3) _totalMarkets++;
+
+        if (_totalMarkets == 3) {
+            //
+            _disallocateFundsTo2Markets(_amount);
+        } else if (_totalMarkets == 2) {
+            //
+            _disallocateFundsTo3Markets(_amount);
+        } else if (_totalMarkets == 1) {
+            // withdraw
+            if (_isC) _deposit(StrategyType.COMPOUND, _amount);
+            else if (_isV2) _deposit(StrategyType.AAVE_V2, _amount);
+            else if (_isV3) _deposit(StrategyType.AAVE_V3, _amount);
+        } else {
+            revert("No Markets Available");
+        }
     }
 
     function _deposit(StrategyType _strategy, uint _amount) internal {
@@ -350,7 +407,26 @@ contract USDCStrategy is BaseStrategy {
         }
     }
 
-    function _withdraw(StrategyType _strategy, uint _amount) internal {
+    function _withdraw(
+        StrategyType _strategy,
+        uint _amount,
+        bool _revert
+    ) internal {
+        uint _poolBalance;
+        if (_strategy == StrategyType.COMPOUND) {
+            _poolBalance = ERC20(USDC).balanceOf(address(COMP_USDC));
+        } else if (_strategy == StrategyType.AAVE_V2) {
+            _poolBalance = ERC20(USDC).balanceOf(AAVE_V2_USDC);
+        } else if (_strategy == StrategyType.AAVE_V3) {
+            _poolBalance = ERC20(USDC).balanceOf(AAVE_V3_USDC);
+        }
+
+        if (_revert) {
+            require(_poolBalance >= _amount, "!pool balance");
+        } else {
+            _amount = min(_poolBalance, _amount);
+        }
+
         if (_strategy == StrategyType.COMPOUND) {
             COMP_USDC.withdraw(USDC, _amount);
         } else if (_strategy == StrategyType.AAVE_V2) {
@@ -381,42 +457,417 @@ contract USDCStrategy is BaseStrategy {
 
     function _totalAmounts() internal view returns (uint256 _totalAssets) {
         _totalAssets =
-            ERC20(USDC).balanceOf(address(this)) +
-            ERC20(address(COMP_USDC)).balanceOf(address(this)) +
-            ERC20(AAVE_V2_USDC).balanceOf(address(this)) +
-            ERC20(AAVE_V3_USDC).balanceOf(address(this));
+            _balanceOfToken(T.U) +
+            _balanceOfToken(T.C) +
+            _balanceOfToken(T.A2) +
+            _balanceOfToken(T.A3);
     }
 
-    function _getHighestYield() internal view returns (StrategyType _highest) {
+    function _getSupplyRate(
+        StrategyType _strat
+    ) internal view returns (uint _apr) {
+        if (_strat == StrategyType.COMPOUND) {
+            // adapted
+            _apr = _compAprAdapter(
+                COMP_USDC.getSupplyRate(COMP_USDC.getUtilization()),
+                true
+            );
+        } else if (_strat == StrategyType.AAVE_V2) {
+            _apr = aaveV2.getReserveData(USDC).currentLiquidityRate;
+        } else if (_strat == StrategyType.AAVE_V3) {
+            _apr = aaveV3.getReserveData(USDC).currentLiquidityRate;
+        } else {
+            revert("invalid strat type");
+        }
+    }
+
+    function _loadConstants() internal {
         // compound
-        uint _supplyRate = (COMP_USDC.getSupplyRate(
-            COMP_USDC.getUtilization()
-        ) * RAY) / COMP100APR;
-        uint _maxRate = _supplyRate;
-        if (_isActive(StrategyType.COMPOUND)) _highest = StrategyType.COMPOUND;
-        // Aave V2
-        _supplyRate = aaveV2.getReserveData(USDC).currentLiquidityRate;
-        if (_supplyRate > _maxRate && _isActive(StrategyType.AAVE_V2)) {
-            _highest = StrategyType.AAVE_V2;
-            _maxRate = _supplyRate;
+        _comp_base = int(COMP_USDC.supplyPerSecondInterestRateBase());
+        _comp_rsl = int(COMP_USDC.supplyPerSecondInterestRateSlopeLow());
+        _comp_rsh = int(COMP_USDC.supplyPerSecondInterestRateSlopeHigh());
+        _comp_kink = int(COMP_USDC.supplyKink());
+    }
+
+    function _getCompoundVars()
+        internal
+        view
+        returns (CompoundVars memory vars)
+    {
+        vars.tS = int(COMP_USDC.totalSupply());
+        vars.tB = int(COMP_USDC.totalBorrow());
+        vars.base = _comp_base;
+        vars.rsl = _comp_rsl;
+        vars.rsh = _comp_rsh;
+        vars.kink = _comp_kink;
+    }
+
+    function _loadAaveV2(address _strat) internal {
+        // aave v2
+        if (_strat != _aaveV2Strategy) {
+            IAaveV2InterestStrategy _interestStart = IAaveV2InterestStrategy(
+                _strat
+            );
+            _base_V2 = int(_interestStart.baseVariableBorrowRate());
+            _vrs1_V2 = int(_interestStart.variableRateSlope1());
+            _vrs2_V2 = int(_interestStart.variableRateSlope2());
+            _opt_V2 = int(_interestStart.OPTIMAL_UTILIZATION_RATE());
+            _exc_V2 = int(_interestStart.EXCESS_UTILIZATION_RATE());
         }
-        // Aave V3
-        _supplyRate = aaveV3.getReserveData(USDC).currentLiquidityRate;
-        if (_supplyRate > _maxRate && _isActive(StrategyType.AAVE_V3)) {
-            _highest = StrategyType.AAVE_V3;
+    }
+
+    function _loadAaveV3(address _strat) internal {
+        // aave v3
+        if (_strat != _aaveV3Strategy) {
+            IAaveV3InterestStrategy _interestStart = IAaveV3InterestStrategy(
+                _strat
+            );
+            _base_V3 = int(_interestStart.getBaseVariableBorrowRate());
+            _vrs1_V3 = int(_interestStart.getVariableRateSlope1());
+            _vrs2_V3 = int(_interestStart.getVariableRateSlope2());
+            _opt_V3 = int(_interestStart.OPTIMAL_USAGE_RATIO());
+            _exc_V3 = int(_interestStart.MAX_EXCESS_USAGE_RATIO());
         }
+    }
+
+    function _getAaveV2Vars() internal returns (AaveVars memory vars) {
+        IAaveV2.ReserveData memory _data = aaveV2.getReserveData(USDC);
+        IAaveV2InterestStrategy _interestStart = IAaveV2InterestStrategy(
+            _data.interestRateStrategyAddress
+        );
+        _loadAaveV2(address(_interestStart));
+        uint _reserveFactor = ((_data.configuration.data >> 64) & 65535);
+        (uint _tsd, uint _avgSBR) = IStableDebtToken(
+            _data.stableDebtTokenAddress
+        ).getTotalSupplyAndAvgRate();
+        (vars.tSD, vars.avgSBR) = (int(_tsd), int(_avgSBR));
+        vars.tVD = int(
+            rayMul(
+                IVariableDebtToken(_data.variableDebtTokenAddress)
+                    .scaledTotalSupply(),
+                uint(_data.variableBorrowIndex)
+            )
+        );
+        vars.tD = vars.tVD + vars.tSD;
+        vars.aL = int(ERC20(USDC).balanceOf(_data.aTokenAddress));
+        vars.subFactor = PERCENT_FACTOR - int(_reserveFactor);
+        vars.base = _base_V2;
+        vars.vrs1 = _vrs1_V2;
+        vars.vrs2 = _vrs2_V2;
+        vars.opt = _opt_V2;
+        vars.exc = _exc_V2;
+
+        // console.log(">------V2---------");
+        // console.log("tSD", uint(vars.tSD));
+        // console.log("avgSBR", uint(vars.avgSBR));
+        // console.log("tVD", uint(vars.tVD));
+        // console.log("subFactor", uint(vars.subFactor));
+        // console.log("tD", uint(vars.tD));
+        // console.log("aL", uint(vars.aL));
+        // console.log("base", uint(vars.base));
+        // console.log("vrs1", uint(vars.vrs1));
+        // console.log("vrs2", uint(vars.vrs2));
+        // console.log("opt", uint(vars.opt));
+        // console.log("exc", uint(vars.exc));
+        // console.log(">------V2---------");
+    }
+
+    function _getAaveV3Vars() internal returns (AaveVars memory vars) {
+        IAaveV3.ReserveData memory _data = aaveV3.getReserveData(USDC);
+        IAaveV3InterestStrategy _interestStart = IAaveV3InterestStrategy(
+            _data.interestRateStrategyAddress
+        );
+        _loadAaveV3(address(_interestStart));
+        uint _reserveFactor = ((_data.configuration.data >> 64) & 65535);
+        (uint _tsd, uint _avgSBR) = IStableDebtToken(
+            _data.stableDebtTokenAddress
+        ).getTotalSupplyAndAvgRate();
+        (vars.tSD, vars.avgSBR) = (int(_tsd), int(_avgSBR));
+        vars.tVD = int(
+            rayMul(
+                IVariableDebtToken(_data.variableDebtTokenAddress)
+                    .scaledTotalSupply(),
+                uint(_data.variableBorrowIndex)
+            )
+        );
+        vars.tD = vars.tVD + vars.tSD;
+        vars.aL = int(ERC20(USDC).balanceOf(_data.aTokenAddress));
+        vars.subFactor = PERCENT_FACTOR - int(_reserveFactor);
+        vars.base = _base_V3;
+        vars.vrs1 = _vrs1_V3;
+        vars.vrs2 = _vrs2_V3;
+        vars.opt = _opt_V3;
+        vars.exc = _exc_V3;
+
+        // console.log(">------V3---------");
+        // console.log("tD", uint(vars.tD));
+        // console.log("aL", uint(vars.aL));
+        // console.log("reserveFactor", _reserveFactor);
+        // console.log("base", uint(vars.base));
+        // console.log("vrs1", uint(vars.vrs1));
+        // console.log("vrs2", uint(vars.vrs2));
+        // console.log("opt", uint(vars.opt));
+        // console.log("exc", uint(vars.exc));
+        // console.log(">------V3---------");
+    }
+
+    function _reachApr(
+        YieldVar memory _from,
+        YieldVar memory _to,
+        ReservesVars memory _r,
+        YieldVar[3] memory _y,
+        uint _amount
+    ) internal view returns (uint) {
+        return
+            _reachApr(_from, _r, _y, _amount, _aprToAmount(_from, _r, _to.apr));
+    }
+
+    function _reachApr(
+        YieldVar memory _from,
+        ReservesVars memory _r,
+        YieldVar[3] memory _y,
+        uint _amount,
+        uint _a // amount to deploy
+    ) internal view returns (uint) {
+        if (_a >= _amount) {
+            _from.amt += _amount;
+            console.log("amts _a _amount", _a / 1e6, _amount / 1e6);
+            _amount = 0;
+        } else {
+            _from.amt += _a;
+            _amount -= _a;
+            // update apr for 1st and info, simulate a deposit
+            _updateVirtualReserve(_from, _r, _a);
+            // order for safety
+            _orderYields(_y);
+        }
+        console.log(
+            "checkmark type apr amount",
+            uint(_from.stratType),
+            _from.apr / 1e23,
+            _amount
+        );
+        return _amount;
+    }
+
+    function _allocateFundsTo2Markets(
+        uint _amount,
+        bool _isC,
+        bool _isV2,
+        bool _isV3
+    ) internal {
+        YieldVar[3] memory y;
+        ReservesVars memory r;
+        uint i;
+        // load them up
+        if (_isC) {
+            r.c = _getCompoundVars();
+            y[i].stratType = StrategyType.COMPOUND;
+            y[i].apr = _getSupplyRate(y[i].stratType);
+            i++;
+        }
+        if (_isV2) {
+            r.v2 = _getAaveV2Vars();
+            y[i].stratType = StrategyType.AAVE_V2;
+            y[i].apr = _getSupplyRate(y[i].stratType);
+            i++;
+        }
+        if (_isV3) {
+            r.v3 = _getAaveV3Vars();
+            y[i].stratType = StrategyType.AAVE_V3;
+            y[i].apr = _getSupplyRate(y[i].stratType);
+            i++;
+        }
+        // ordering
+        _orderYields(y);
+        while (_amount != 0) {
+            if (lt(y[1].apr, y[0].apr)) {
+                console.log("CHECK 1");
+                // i1 < i0
+                _amount = _reachApr(y[0], y[1], r, y, _amount);
+            } else if (eq(y[1].apr, y[0].apr)) {
+                console.log("CHECK 2");
+                // i1 = i0
+                uint _third = _amount / 7;
+                if (_third == 0) _third = _amount;
+                _amount = _reachApr(y[0], r, y, _amount, _third);
+            }
+        }
+
+        // deploy respective amounts for each market
+        for (i = 0; i < 2; i++) {
+            uint _amt = y[i].amt;
+            if (_amt > 0) {
+                console.log(
+                    "allocate type amt:",
+                    uint(y[i].stratType),
+                    _amt / 1e6
+                );
+                _deposit(y[i].stratType, _amt);
+            }
+        }
+    }
+
+    // amount to be dpeloyed, should be current balance of USDC
+    function _allocateFundsTo3Markets(uint _amount) internal {
+        YieldVar[3] memory y;
+        ReservesVars memory r;
+        // TBD check compound vars that might need to be updated through a load,
+        // if they update the implemenatation
+        r.c = _getCompoundVars();
+        r.v2 = _getAaveV2Vars();
+        r.v3 = _getAaveV3Vars();
+        // load them up
+        for (uint i; i < 3; i++) {
+            y[i].apr = _getSupplyRate(StrategyType(i));
+            y[i].stratType = StrategyType(i);
+        }
+        // ordering
+        _orderYields(y);
+        console.log("order 0 type apr", uint(y[0].stratType), y[0].apr / 1e23);
+        console.log("order 1 type apr", uint(y[1].stratType), y[1].apr / 1e23);
+        console.log("order 2 type apr", uint(y[2].stratType), y[2].apr / 1e23);
+        // attempt to bring 0 to 1 rate
+        // TBD consider v3 supply cap
+        while (_amount != 0) {
+            if (lt(y[2].apr, y[1].apr) && lt(y[1].apr, y[0].apr)) {
+                console.log("CHECK 1");
+                // i2 < i1 < i0
+                _amount = _reachApr(y[0], y[1], r, y, _amount);
+            } else if (lt(y[2].apr, y[1].apr) && eq(y[1].apr, y[0].apr)) {
+                console.log("CHECK 2");
+                // i2 < i1 = i0
+                uint _a0 = _aprToAmount(y[0], r, y[2].apr);
+                uint _a1 = _aprToAmount(y[1], r, y[2].apr);
+                if (_a0 + _a1 <= _amount) {
+                    console.log("CHECK 2_1");
+                    _amount = _reachApr(y[0], y[2], r, y, _amount);
+                    _amount = _reachApr(y[1], y[2], r, y, _amount);
+                } else if (_a0 <= _amount) {
+                    console.log("CHECK 2_2");
+                    _amount = _reachApr(y[0], y[2], r, y, _amount);
+                } else if (_a1 <= _amount) {
+                    console.log("CHECK 2_3");
+                    _amount = _reachApr(y[1], y[2], r, y, _amount);
+                } else {
+                    console.log("CHECK 2_4");
+                    uint _third = _amount / 7;
+                    if (_third == 0) _third = _amount;
+                    _amount = _reachApr(y[0], r, y, _amount, _third);
+                }
+            } else if (eq(y[2].apr, y[1].apr) && lt(y[1].apr, y[0].apr)) {
+                console.log("CHECK 3");
+                // i2 = i1 < i0
+                _amount = _reachApr(y[0], y[1], r, y, _amount);
+            } else {
+                console.log(
+                    "CHECK 4",
+                    y[0].apr / 1e23,
+                    y[1].apr / 1e23,
+                    y[2].apr / 1e23
+                );
+
+                console.log(
+                    "CHECK amt",
+                    y[0].amt / 1e6,
+                    y[1].amt / 1e6,
+                    y[2].amt / 1e6
+                );
+                // i2 = i1 = i0
+                uint _forth = _amount / 8;
+                if (_forth == 0) _forth = _amount;
+                _amount = _reachApr(y[0], r, y, _amount, _forth);
+            }
+        }
+
+        // deploy respective amounts for each market
+        for (uint i; i < 3; i++) {
+            uint _amt = y[i].amt;
+            if (_amt > 0) {
+                console.log(
+                    "allocate type amt:",
+                    uint(y[i].stratType),
+                    _amt / 1e6
+                );
+                _deposit(y[i].stratType, _amt);
+            }
+        }
+    }
+
+    function _disallocateFundsTo2Markets(uint _amount) internal {
+        //
+    }
+
+    function _disallocateFundsTo3Markets(uint _amount) internal {
+        //
+    }
+
+    // TBD
+    function _amountToApr(
+        YieldVar memory _y,
+        ReservesVars memory _r,
+        uint _amount
+    ) public view returns (uint _apr) {
+        if (_y.stratType == StrategyType.COMPOUND) {
+            _apr = _compAprAdapter(
+                _compAmountToSupplyRate(_r.c, _amount),
+                true
+            );
+            console.log("_apr c", _apr / 1e23);
+        } else if (_y.stratType == StrategyType.AAVE_V2) {
+            _apr = uint(_calcAaveApr(_r.v2, int256(_amount)));
+            console.log("_apr v2", _apr / 1e23);
+        } else if (_y.stratType == StrategyType.AAVE_V3) {
+            _apr = uint(_calcAaveApr(_r.v3, int256(_amount)));
+            console.log("_apr v3", _apr / 1e23);
+        }
+    }
+
+    function _aprToAmount(
+        YieldVar memory _y,
+        ReservesVars memory _r,
+        uint _apr
+    ) public view returns (uint _amount) {
+        if (_y.stratType == StrategyType.COMPOUND) {
+            _amount = _calcCompoundInterestToAmount(_r.c, _apr);
+            console.log("comp", _amount / 1e6);
+        } else if (_y.stratType == StrategyType.AAVE_V2) {
+            _amount = _calcAaveInterestToAmount(_r.v2, int(_apr));
+            console.log("aaveV2", _amount / 1e6);
+        } else if (_y.stratType == StrategyType.AAVE_V3) {
+            _amount = _calcAaveInterestToAmount(_r.v3, int(_apr));
+            console.log("aaveV3", _amount / 1e6);
+        } else {
+            revert("invalid");
+        }
+        console.log("input rate:", _apr / 1e23, _amount / 1e6);
+    }
+
+    function _calcAaveInterestToAmount(
+        AaveVars memory v,
+        int _apr
+    ) public view returns (uint _amount) {
+        // console.log("---------------");
+        int _amount0 = int(abs(_calcAmount(v, true, _apr)));
+        // console.log("---------------");
+        int _amount1 = int(abs(_calcAmount(v, false, _apr)));
+        // console.log("---------------");
+        int sr0 = _calcAaveApr(v, _amount0);
+        int sr1 = _calcAaveApr(v, _amount1);
+
+        // console.log("aave amount0", uint(_amount0), uint(_amount0) / 1e6);
+        // console.log("aave amount1", uint(_amount1), uint(_amount1) / 1e6);
+
+        // console.log("sr0", uint(sr0), uint(sr0) / 1e23);
+        // console.log("sr1", uint(sr1), uint(sr1) / 1e23);
+        _amount = abs(_apr - sr0) < abs(_apr - sr1)
+            ? uint(_amount0)
+            : uint(_amount1);
+        console.log("aave amount", uint(_amount) / 1e6);
     }
 
     // used by gelato checker, to determine if it needs to be called
-    function status()
-        external
-        view
-        returns (bool _isYieldChanged, bool _keeperStatus)
-    {
-        return (highest != _getHighestYield(), _isKeeperActive);
-    }
-
-    function min(uint a, uint b) internal pure returns (uint) {
-        return a < b ? a : b;
+    function status() external view returns (bool _keeperStatus) {
+        return (_isKeeperActive);
     }
 }
