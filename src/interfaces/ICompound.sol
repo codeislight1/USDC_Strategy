@@ -11,4 +11,19 @@ interface ICompound {
     function getUtilization() external view returns (uint);
 
     function isSupplyPaused() external view returns (bool);
+
+    function supplyPerSecondInterestRateSlopeLow() external view returns (uint);
+
+    function supplyPerSecondInterestRateSlopeHigh()
+        external
+        view
+        returns (uint);
+
+    function supplyPerSecondInterestRateBase() external view returns (uint);
+
+    function supplyKink() external view returns (uint);
+
+    function totalSupply() external view returns (uint256);
+
+    function totalBorrow() external view returns (uint256);
 }
