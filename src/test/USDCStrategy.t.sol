@@ -488,31 +488,31 @@ contract USDCStrategyTest is OptimizerSetup {
     //     _aaveV2Test(8 * 1e25);
     // }
 
-    function test_deposit20M() public {
+    function test_deposit_withdraw_20M() public {
         super.setUp();
         USDCStrategy strat = USDCStrategy(address(strategy));
-        uint _amount = 5_000_000 * 1e6;
-        // airdrop(ERC20(USDC), user, _amount);
-        // vm.startPrank(user);
-        // ERC20(USDC).approve(address(aaveV3), type(uint).max);
-        // console.log(
-        //     "LR before",
-        //     uint(aaveV3.getReserveData(USDC).currentLiquidityRate),
-        //     uint(aaveV3.getReserveData(USDC).currentLiquidityRate) / 1e23
-        // );
-        // aaveV3.supply(USDC, _amount, user, 0);
-        // console.log(
-        //     "LR after",
-        //     uint(aaveV3.getReserveData(USDC).currentLiquidityRate),
-        //     uint(aaveV3.getReserveData(USDC).currentLiquidityRate) / 1e23
-        // );
+        uint _amount = 20_000_000 * 1e6;
 
-        strat.status();
+        strat.printAprs();
         uint _pre = gasleft();
         mintAndDepositIntoStrategy(strategy, user, _amount);
         uint _post = gasleft();
-        console.log("gas consumed", _pre - _post);
-        strat.status();
+        console.log("deposit gas consumed", _pre - _post);
+        strat.printAprs();
+
+        skip(1);
+        console.log("--------------");
+
+        // Withdraw all funds
+        _pre = gasleft();
+        vm.prank(user);
+        strategy.redeem(_amount / 2, user, user);
+        _post = gasleft();
+        console.log("withdraw gas consumed", _pre - _post);
+        console.log(
+            "withdrawn amount",
+            ERC20(USDC).balanceOf(address(user)) / 1e6
+        );
     }
 
     // experiment with change in interest as funds are added and removed

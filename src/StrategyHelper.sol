@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.18;
+
 import "forge-std/console.sol";
 
 contract StrategyHelper {
@@ -54,8 +55,16 @@ contract StrategyHelper {
     }
 
     struct YieldVar {
+        // apr offered
+        // deposit: 0 unsupported or not used | x apr offered
+        // withdrawal: x apr offered | uint.max unsupported or not used
         uint apr;
-        uint amt; // amount to be deployed
+        // amount to be deployed
+        uint amt;
+        // @dev amount cap for deposit or withdraw
+        // deposit: 0 maxed out | x amount available | uint.max unlimited, no limit
+        // withdrawal: 0 no more available | x amount available
+        uint limit;
         StrategyType stratType;
     }
 
@@ -71,10 +80,22 @@ contract StrategyHelper {
         return l(a) == l(b);
     }
 
-    function _orderYields(YieldVar[3] memory y) internal pure {
+    function _orderYields(YieldVar[3] memory y) internal view {
         if (y[1].apr < y[2].apr) (y[1], y[2]) = (y[2], y[1]);
         if (y[0].apr < y[1].apr) (y[0], y[1]) = (y[1], y[0]);
         if (y[1].apr < y[2].apr) (y[1], y[2]) = (y[2], y[1]);
+        console.log(
+            "## yields ##",
+            uint(y[0].stratType),
+            uint(y[1].stratType),
+            uint(y[2].stratType)
+        );
+        console.log(
+            "## yields ordered ##",
+            y[0].apr / 1e23,
+            y[1].apr / 1e23,
+            y[2].apr / 1e23
+        );
     }
 
     function _compAprAdapter(
@@ -86,7 +107,8 @@ contract StrategyHelper {
 
     function _calcCompoundInterestToAmount(
         CompoundVars memory v,
-        uint _apr
+        uint _apr,
+        bool isDeposit
     ) public pure returns (uint _amount) {
         _apr = _compAprAdapter(_apr, false);
         int _s = int(_apr);
@@ -99,11 +121,11 @@ contract StrategyHelper {
         // uint _sr0 = COMP_USDC.getSupplyRate(
         //     uint((v.tB * int(COMP_FACTOR)) / (v.tS + int(_amount0)))
         // );
-        uint _sr0 = _compAmountToSupplyRate(v, _amount0);
+        uint _sr0 = _compAmountToSupplyRate(v, _amount0, isDeposit);
         // uint _sr1 = COMP_USDC.getSupplyRate(
         //     abs((v.tB * int(COMP_FACTOR)) / (v.tS + int(_amount1)))
         // );
-        uint _sr1 = _compAmountToSupplyRate(v, _amount1);
+        uint _sr1 = _compAmountToSupplyRate(v, _amount1, isDeposit);
         _amount = abs(_s - int(_sr0)) < abs(_s - int(_sr1))
             ? uint(_amount0)
             : uint(_amount1);
@@ -112,15 +134,19 @@ contract StrategyHelper {
     function _compAmountToSupplyRate(
         CompoundVars memory _v
     ) internal pure returns (uint) {
-        return _compAmountToSupplyRate(_v, 0);
+        return _compAmountToSupplyRate(_v, 0, true); // direction won't matter
     }
 
     function _compAmountToSupplyRate(
         CompoundVars memory _v,
-        uint _amountToAdd
+        uint _amount,
+        bool isDeposit // if so increment otherwise decrement
     ) internal pure returns (uint _supplyRate) {
+        // TBD ensure tS != _amount when withdrawing
+
         // utilization = totalBorrows * FACTOR / totalSupply
-        uint _u = (uint(_v.tB) * COMP_FACTOR) / (uint(_v.tS) + _amountToAdd);
+        uint _u = (uint(_v.tB) * COMP_FACTOR) /
+            (isDeposit ? (uint(_v.tS) + _amount) : (uint(_v.tS) - _amount));
         // supplyRate
         // if(utilization <= supplyKink) supplyRate = base + mulFactor(low,utilization)
         if (_u <= uint(_v.kink)) {
@@ -137,12 +163,19 @@ contract StrategyHelper {
 
     function _calcAaveApr(
         AaveVars memory v,
-        int addedAmount
+        int adjAmount,
+        bool isDeposit // if so increment otherwise decrement
     ) internal pure returns (int) {
+        // TBD ensure addedAmount != v.tD + v.aL when withdrawing
         uint currentVariableBorrowRate;
         uint utilizationRate = v.tD == 0
             ? 0
-            : rayDiv(uint(v.tD), uint(v.aL + addedAmount + v.tD));
+            : rayDiv(
+                uint(v.tD),
+                uint(
+                    v.aL + (isDeposit ? (v.tD + adjAmount) : (v.tD - adjAmount))
+                )
+            );
         if (utilizationRate > uint(v.opt)) {
             uint256 excessUtilizationRateRatio = rayDiv(
                 utilizationRate - uint(v.opt),
@@ -282,21 +315,31 @@ contract StrategyHelper {
     function _updateVirtualReserve(
         YieldVar memory _y,
         ReservesVars memory _r,
-        uint _amount
-    ) internal pure {
+        uint _amount,
+        bool isDeposit
+    ) internal view {
         //
+        console.log(
+            "// updateVirtualReserve: amount isDeposit:",
+            _amount / 1e6,
+            isDeposit
+        );
         if (_y.stratType == StrategyType.COMPOUND) {
-            //
-            _r.c.tS += int256(_amount);
+            // TBD ensure tS > _amount when withdrawing
+            if (isDeposit) _r.c.tS += int256(_amount);
+            else _r.c.tS -= int256(_amount);
+
             _y.apr = _compAprAdapter(_compAmountToSupplyRate(_r.c), true);
         } else if (_y.stratType == StrategyType.AAVE_V2) {
             //
-            _y.apr = uint(_calcAaveApr(_r.v2, int256(_amount)));
-            _r.v2.aL += int256(_amount);
+            _y.apr = uint(_calcAaveApr(_r.v2, int256(_amount), isDeposit));
+            if (isDeposit) _r.v2.aL += int256(_amount);
+            else _r.v2.aL -= int256(_amount);
         } else if (_y.stratType == StrategyType.AAVE_V3) {
             //
-            _y.apr = uint(_calcAaveApr(_r.v3, int256(_amount)));
-            _r.v3.aL += int256(_amount);
+            _y.apr = uint(_calcAaveApr(_r.v3, int256(_amount), isDeposit));
+            if (isDeposit) _r.v3.aL += int256(_amount);
+            else _r.v3.aL -= int256(_amount);
         }
     }
 

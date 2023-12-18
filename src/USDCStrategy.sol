@@ -41,9 +41,10 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
     address constant USDC = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174;
     address constant AAVE_V2_USDC = 0x1a13F4Ca1d028320A707D99520AbFefca3998b7F;
     address constant AAVE_V3_USDC = 0x625E7708f30cA75bfd92586e17077590C60eb4cD;
+    uint constant DECIMALS = 6;
+    uint constant MINIMUM = 1000 * 10 ** DECIMALS;
 
     bool _isKeeperActive;
-    uint MAX_CAP_AAVE_V3 = 150_000_000e6;
     uint public lastExecuted;
 
     int _comp_base;
@@ -120,7 +121,7 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
      * @param _amount, The amount of 'asset' to be freed.
      */
     function _freeFunds(uint256 _amount) internal override {
-        // _withdraw(highest, _amount, true);
+        _withdraw(_amount);
     }
 
     /**
@@ -220,8 +221,20 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
 
     function availableDepositLimit(
         address
-    ) public pure override returns (uint256) {
-        return type(uint).max;
+    ) public view override returns (uint256) {
+        // C active ? third max : 0
+        // V2 active ? third max : 0
+        // V3 active ? limit - supply : 0
+        uint thirdMax = type(uint).max / 3; // uint.max / number of markets
+        uint v3_tS = ERC20(AAVE_V3_USDC).totalSupply();
+        uint v3_cap = _getV3SupplyCap();
+        uint v3Limit = v3_cap == 0
+            ? thirdMax
+            : (v3_cap > v3_tS ? v3_cap - v3_tS : 0);
+        return
+            (_isActive(StrategyType.COMPOUND) ? thirdMax : 0) +
+            (_isActive(StrategyType.AAVE_V2) ? thirdMax : 0) +
+            (_isActive(StrategyType.AAVE_V3) ? v3Limit : 0);
     }
 
     /**
@@ -327,7 +340,14 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
         _isKeeperActive = _active;
     }
 
+    function _getV3SupplyCap() internal view returns (uint) {
+        return
+            ((aaveV3.getReserveData(USDC).configuration.data >> 116) &
+                68719476735) * 10 ** DECIMALS;
+    }
+
     function _deposit(uint _amount) internal {
+        // 1
         bool _isC = _isActive(StrategyType.COMPOUND);
         bool _isV2 = _isActive(StrategyType.AAVE_V2);
         bool _isV3 = _isActive(StrategyType.AAVE_V3);
@@ -337,17 +357,128 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
         if (_isV2) _totalMarkets++;
         if (_isV3) _totalMarkets++;
 
+        // 2
+        YieldVar[3] memory y;
+        ReservesVars memory r;
+        // TBD check compound vars that might need to be updated through a load,
+        // if they update the implemenatation
+        uint i;
+        // load them up
+        if (_isC) {
+            r.c = _getCompoundVars();
+            y[i].stratType = StrategyType.COMPOUND;
+            y[i].apr = _getSupplyRate(y[i].stratType);
+            y[i].limit = type(uint).max; // no limit
+            console.log(
+                "vars deposit C",
+                uint(y[i].stratType),
+                y[i].apr / 1e23,
+                y[i].limit / 1e6
+            );
+            i++;
+        }
+        if (_isV2) {
+            r.v2 = _getAaveV2Vars();
+            y[i].stratType = StrategyType.AAVE_V2;
+            y[i].apr = _getSupplyRate(y[i].stratType);
+            y[i].limit = type(uint).max; // no limit
+            console.log(
+                "vars deposit V2",
+                uint(y[i].stratType),
+                y[i].apr / 1e23,
+                y[i].limit / 1e6
+            );
+            i++;
+        }
+
+        if (_isV3) {
+            r.v3 = _getAaveV3Vars();
+            y[i].stratType = StrategyType.AAVE_V3;
+            y[i].apr = _getSupplyRate(y[i].stratType);
+            uint supplyCap = _getV3SupplyCap();
+            uint tS = ERC20(AAVE_V3_USDC).totalSupply();
+            y[i].limit = supplyCap == 0
+                ? type(uint).max
+                : (tS < supplyCap ? supplyCap - tS : 0);
+            console.log(
+                "vars deposit V3",
+                uint(y[i].stratType),
+                y[i].apr / 1e23,
+                y[i].limit / 1e6
+            );
+        }
+        // ordering
+        _orderYields(y);
+        // console.log("order 0 type apr", uint(y[0].stratType), y[0].apr / 1e23);
+        // console.log("order 1 type apr", uint(y[1].stratType), y[1].apr / 1e23);
+        // console.log("order 2 type apr", uint(y[2].stratType), y[2].apr / 1e23);
+        // 3
         if (_totalMarkets == 3) {
-            _allocateFundsTo3Markets(_amount);
+            // console.log("3Markets");
+            // 3 can turn into 2
+            _amount = _allocateFundsTo3Markets(y, r, _amount); // might reach cap
+            if (_amount != 0) _allocateFundsTo2Markets(y, r, _amount);
         } else if (_totalMarkets == 2) {
-            _allocateFundsTo2Markets(_amount, _isC, _isV2, _isV3);
+            // console.log("2Markets");
+            // 2 can turn into 1
+            _amount = _allocateFundsTo2Markets(y, r, _amount); // might reach cap
+            if (_amount != 0)
+                _allocateFundsTo1Market(y, y[0].stratType, _amount);
         } else if (_totalMarkets == 1) {
-            if (_isC) _deposit(StrategyType.COMPOUND, _amount);
-            else if (_isV2) _deposit(StrategyType.AAVE_V2, _amount);
-            else if (_isV3) _deposit(StrategyType.AAVE_V3, _amount);
+            // console.log("1Market");
+            // 1 is a 1
+            _allocateFundsTo1Market(y, y[0].stratType, _amount);
         } else {
             revert("No Markets Available");
         }
+
+        // deploy respective amounts for each market
+        for (i = 0; i < 3; i++) {
+            uint _amt = y[i].amt;
+            if (_amt > 0) {
+                console.log(
+                    "allocate type amt:",
+                    uint(y[i].stratType),
+                    _amt / 1e6
+                );
+                _deposit(y[i].stratType, _amt);
+            }
+        }
+    }
+
+    //add amount while being considerate tolimit
+    function _addAmt(
+        YieldVar[3] memory _y,
+        StrategyType _strat,
+        uint _amount
+    ) internal view returns (uint _deployedAmount, bool _isHitLimit) {
+        uint _amt;
+        uint limit;
+        for (uint i; i < 3; i++) {
+            if (_y[i].stratType == _strat) {
+                uint _total = _amount + _y[i].amt;
+                limit = _y[i].limit;
+                if (limit >= _total) {
+                    _amt = _amount;
+                    _y[i].amt += _amt;
+                } else {
+                    // console.log("else reached", limit, _y[i].amt);
+                    _amt = limit - _y[i].amt;
+                    _y[i].amt = limit;
+                    //
+                    _y[i].apr = 0; // TBD send it to index 2 or 1
+                    _isHitLimit = true;
+                }
+                // console.log("// add amt:");
+                // console.log("type", uint(_strat));
+                // console.log("total", _total / 1e6);
+                // console.log("amount", _amount / 1e6);
+                // console.log("amt", _amt / 1e6);
+                // console.log("limit", limit / 1e6);
+                break;
+            }
+        }
+        return (_amt, _isHitLimit);
     }
 
     function _balanceOfToken(T _token) internal view returns (uint) {
@@ -368,32 +499,110 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
     }
 
     function _withdraw(uint _amount) internal {
+        // 1
         bool _isC = _isActive(StrategyType.COMPOUND);
         bool _isV2 = _isActive(StrategyType.AAVE_V2);
         bool _isV3 = _isActive(StrategyType.AAVE_V3);
-        uint _amt;
-        // option 1
-        ERC20(AAVE_V3_USDC).balanceOf(address(this));
 
-        // option 2
         uint _totalMarkets;
         if (_isC) _totalMarkets++;
         if (_isV2) _totalMarkets++;
         if (_isV3) _totalMarkets++;
 
+        // 2
+        YieldVar[3] memory y;
+        ReservesVars memory r;
+        uint i;
+
+        if (_isC) {
+            //
+            r.c = _getCompoundVars();
+            y[i].stratType = StrategyType.COMPOUND;
+            y[i].apr = _getSupplyRate(y[i].stratType);
+            y[i].limit = min(
+                _balanceOfToken(T.U, address(COMP_USDC)),
+                _balanceOfToken(T.C)
+            );
+            console.log(
+                "vars withdraw C",
+                uint(y[i].stratType),
+                y[i].apr / 1e23,
+                y[i].limit / 1e6
+            );
+            i++;
+        }
+
+        if (_isV2) {
+            //
+            r.v2 = _getAaveV2Vars();
+            y[i].stratType = StrategyType.AAVE_V2;
+            y[i].apr = _getSupplyRate(y[i].stratType);
+            y[i].limit = min(
+                _balanceOfToken(T.U, address(AAVE_V2_USDC)),
+                _balanceOfToken(T.A2)
+            );
+            console.log(
+                "vars withdraw V2",
+                uint(y[i].stratType),
+                y[i].apr / 1e23,
+                y[i].limit / 1e6
+            );
+            i++;
+        }
+
+        if (_isV3) {
+            //
+            r.v3 = _getAaveV3Vars();
+            y[i].stratType = StrategyType.AAVE_V3;
+            y[i].apr = _getSupplyRate(y[i].stratType);
+            y[i].limit = min(
+                _balanceOfToken(T.U, address(AAVE_V3_USDC)),
+                _balanceOfToken(T.A3)
+            );
+            console.log(
+                "vars withdraw V3",
+                uint(y[i].stratType),
+                y[i].apr / 1e23,
+                y[i].limit / 1e6
+            );
+        }
+
+        // ordering
+        _orderYields(y);
+        // console.log("order 0 type apr", uint(y[0].stratType), y[0].apr / 1e23);
+        // console.log("order 1 type apr", uint(y[1].stratType), y[1].apr / 1e23);
+        // console.log("order 2 type apr", uint(y[2].stratType), y[2].apr / 1e23);
+
+        // 3
         if (_totalMarkets == 3) {
             //
-            _disallocateFundsTo2Markets(_amount);
+            _amount = _disallocateFundsFrom3Markets(y, r, _amount);
+            if (_amount > 0)
+                _amount = _disallocateFundsFrom2Markets(y, r, _amount);
+            if (_amount > 0)
+                _disallocateFundsFrom1Market(y, y[0].stratType, _amount);
         } else if (_totalMarkets == 2) {
             //
-            _disallocateFundsTo3Markets(_amount);
+            _amount = _disallocateFundsFrom2Markets(y, r, _amount);
+            _disallocateFundsFrom1Market(y, y[0].stratType, _amount);
         } else if (_totalMarkets == 1) {
             // withdraw
-            if (_isC) _deposit(StrategyType.COMPOUND, _amount);
-            else if (_isV2) _deposit(StrategyType.AAVE_V2, _amount);
-            else if (_isV3) _deposit(StrategyType.AAVE_V3, _amount);
+            _disallocateFundsFrom1Market(y, y[0].stratType, _amount);
         } else {
             revert("No Markets Available");
+        }
+
+        // deploy respective amounts for each market
+        for (i = 0; i < 3; i++) {
+            uint _amt = y[i].amt;
+            if (_amt > 0) {
+                console.log(
+                    "disallocate type amt:",
+                    uint(y[i].stratType),
+                    _amt / 1e6
+                );
+                _withdraw(y[i].stratType, _amt);
+            }
         }
     }
 
@@ -407,26 +616,7 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
         }
     }
 
-    function _withdraw(
-        StrategyType _strategy,
-        uint _amount,
-        bool _revert
-    ) internal {
-        uint _poolBalance;
-        if (_strategy == StrategyType.COMPOUND) {
-            _poolBalance = ERC20(USDC).balanceOf(address(COMP_USDC));
-        } else if (_strategy == StrategyType.AAVE_V2) {
-            _poolBalance = ERC20(USDC).balanceOf(AAVE_V2_USDC);
-        } else if (_strategy == StrategyType.AAVE_V3) {
-            _poolBalance = ERC20(USDC).balanceOf(AAVE_V3_USDC);
-        }
-
-        if (_revert) {
-            require(_poolBalance >= _amount, "!pool balance");
-        } else {
-            _amount = min(_poolBalance, _amount);
-        }
-
+    function _withdraw(StrategyType _strategy, uint _amount) internal {
         if (_strategy == StrategyType.COMPOUND) {
             COMP_USDC.withdraw(USDC, _amount);
         } else if (_strategy == StrategyType.AAVE_V2) {
@@ -446,12 +636,13 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
             _active = (((_data >> 56) & 1) == 1) && !(((_data >> 57) & 1) == 1);
         } else if (_strategy == StrategyType.AAVE_V3) {
             uint _data = aaveV3.getReserveData(USDC).configuration.data;
-            uint _supplyCap = ((_data >> 116) & 68719476735) * 10 ** 6;
-            _active =
-                (((_data >> 56) & 1) == 1) &&
+            uint _supplyCap = _getV3SupplyCap();
+            _active = (((_data >> 56) & 1) == 1) &&
                 !(((_data >> 57) & 1) == 1) &&
                 !(((_data >> 60) & 1) == 1) &&
-                ERC20(AAVE_V3_USDC).totalSupply() < _supplyCap;
+                _supplyCap == 0
+                ? true
+                : ERC20(AAVE_V3_USDC).totalSupply() < _supplyCap;
         }
     }
 
@@ -476,8 +667,6 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
             _apr = aaveV2.getReserveData(USDC).currentLiquidityRate;
         } else if (_strat == StrategyType.AAVE_V3) {
             _apr = aaveV3.getReserveData(USDC).currentLiquidityRate;
-        } else {
-            revert("invalid strat type");
         }
     }
 
@@ -616,10 +805,18 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
         YieldVar memory _to,
         ReservesVars memory _r,
         YieldVar[3] memory _y,
-        uint _amount
-    ) internal view returns (uint) {
+        uint _amount,
+        bool _isDeposit
+    ) internal view returns (uint, bool) {
         return
-            _reachApr(_from, _r, _y, _amount, _aprToAmount(_from, _r, _to.apr));
+            _reachApr(
+                _from,
+                _r,
+                _y,
+                _amount,
+                _aprToAmount(_from, _r, _to.apr, _isDeposit),
+                _isDeposit
+            );
     }
 
     function _reachApr(
@@ -627,233 +824,513 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
         ReservesVars memory _r,
         YieldVar[3] memory _y,
         uint _amount,
-        uint _a // amount to deploy
-    ) internal view returns (uint) {
+        uint _a, // amount to deploy
+        bool _isDeposit
+    ) internal view returns (uint _amt, bool _isLimit) {
+        // console.log("## REACH APR");
+        uint _deployedAmount;
         if (_a >= _amount) {
-            _from.amt += _amount;
-            console.log("amts _a _amount", _a / 1e6, _amount / 1e6);
-            _amount = 0;
+            (_deployedAmount, _isLimit) = _addAmt(_y, _from.stratType, _amount);
+            _amount -= _deployedAmount;
         } else {
-            _from.amt += _a;
-            _amount -= _a;
-            // update apr for 1st and info, simulate a deposit
-            _updateVirtualReserve(_from, _r, _a);
-            // order for safety
-            _orderYields(_y);
+            (_deployedAmount, _isLimit) = _addAmt(_y, _from.stratType, _a);
+            _amount -= _deployedAmount;
         }
-        console.log(
-            "checkmark type apr amount",
-            uint(_from.stratType),
-            _from.apr / 1e23,
-            _amount
-        );
-        return _amount;
+        // console.log("amts _a _amount", _a / 1e6, _amount / 1e6);
+        // update apr for 1st and info, simulate a deposit
+        _updateVirtualReserve(_from, _r, _deployedAmount, _isDeposit);
+        // order for safety
+        _orderYields(_y);
+        // console.log(
+        //     "checkmark type apr amount",
+        //     uint(_from.stratType),
+        //     _from.apr / 1e23,
+        //     _amount
+        // );
+        _amt = _amount;
+    }
+
+    function _disallocateFundsFrom1Market(
+        YieldVar[3] memory y,
+        StrategyType _strat,
+        uint _amount
+    ) internal {
+        console.log("## DISALLOCATE 1", _amount / 1e6);
+        if (_strat == StrategyType.COMPOUND) {
+            _addAmt(y, StrategyType.COMPOUND, _amount);
+        } else if (_strat == StrategyType.AAVE_V2) {
+            _addAmt(y, StrategyType.AAVE_V2, _amount);
+        } else if (_strat == StrategyType.AAVE_V3) {
+            _addAmt(y, StrategyType.AAVE_V3, _amount);
+        }
+    }
+
+    function _allocateFundsTo1Market(
+        YieldVar[3] memory y,
+        StrategyType _strat,
+        uint _amount
+    ) internal {
+        console.log("## ALLOCATE 1", _amount / 1e6);
+        if (_strat == StrategyType.COMPOUND) {
+            _addAmt(y, StrategyType.COMPOUND, _amount);
+        } else if (_strat == StrategyType.AAVE_V2) {
+            _addAmt(y, StrategyType.AAVE_V2, _amount);
+        } else if (_strat == StrategyType.AAVE_V3) {
+            _addAmt(y, StrategyType.AAVE_V3, _amount);
+        }
     }
 
     function _allocateFundsTo2Markets(
-        uint _amount,
-        bool _isC,
-        bool _isV2,
-        bool _isV3
-    ) internal {
-        YieldVar[3] memory y;
-        ReservesVars memory r;
-        uint i;
-        // load them up
-        if (_isC) {
-            r.c = _getCompoundVars();
-            y[i].stratType = StrategyType.COMPOUND;
-            y[i].apr = _getSupplyRate(y[i].stratType);
-            i++;
-        }
-        if (_isV2) {
-            r.v2 = _getAaveV2Vars();
-            y[i].stratType = StrategyType.AAVE_V2;
-            y[i].apr = _getSupplyRate(y[i].stratType);
-            i++;
-        }
-        if (_isV3) {
-            r.v3 = _getAaveV3Vars();
-            y[i].stratType = StrategyType.AAVE_V3;
-            y[i].apr = _getSupplyRate(y[i].stratType);
-            i++;
-        }
-        // ordering
-        _orderYields(y);
-        while (_amount != 0) {
-            if (lt(y[1].apr, y[0].apr)) {
-                console.log("CHECK 1");
-                // i1 < i0
-                _amount = _reachApr(y[0], y[1], r, y, _amount);
-            } else if (eq(y[1].apr, y[0].apr)) {
-                console.log("CHECK 2");
-                // i1 = i0
-                uint _third = _amount / 7;
-                if (_third == 0) _third = _amount;
-                _amount = _reachApr(y[0], r, y, _amount, _third);
-            }
-        }
-
-        // deploy respective amounts for each market
-        for (i = 0; i < 2; i++) {
-            uint _amt = y[i].amt;
-            if (_amt > 0) {
-                console.log(
-                    "allocate type amt:",
-                    uint(y[i].stratType),
-                    _amt / 1e6
+        YieldVar[3] memory y,
+        ReservesVars memory r,
+        uint _amt
+    ) internal returns (uint _amount) {
+        // console.log("## ALLOCATE 2");
+        _amount = _amt;
+        bool _isBreak = false;
+        while (_amount != 0 && !_isBreak) {
+            console.log("ALOC2 AMOUNT", _amount / 1e6);
+            if (_amount <= MINIMUM) {
+                (_amount, _isBreak) = _reachApr(
+                    y[0],
+                    r,
+                    y,
+                    _amount,
+                    _amount,
+                    true
                 );
-                _deposit(y[i].stratType, _amt);
+                break;
+            }
+
+            if (lt(y[1].apr, y[0].apr)) {
+                console.log("ALLOC2 CHECK 1");
+                // i1 < i0
+                (_amount, _isBreak) = _reachApr(
+                    y[0],
+                    y[1],
+                    r,
+                    y,
+                    _amount,
+                    true
+                );
+            } else {
+                // pick slowest
+                console.log("ALLOC2 CHECK 2");
+                // i1 = i0
+                uint _seventh = _amount / 7;
+                if (_seventh == 0) _seventh = _amount;
+
+                (_amount, _isBreak) = _reachApr(
+                    y[0],
+                    r,
+                    y,
+                    _amount,
+                    _seventh,
+                    true
+                );
             }
         }
     }
 
+    // TBD assigning by reference or value
+
     // amount to be dpeloyed, should be current balance of USDC
-    function _allocateFundsTo3Markets(uint _amount) internal {
-        YieldVar[3] memory y;
-        ReservesVars memory r;
-        // TBD check compound vars that might need to be updated through a load,
-        // if they update the implemenatation
-        r.c = _getCompoundVars();
-        r.v2 = _getAaveV2Vars();
-        r.v3 = _getAaveV3Vars();
-        // load them up
-        for (uint i; i < 3; i++) {
-            y[i].apr = _getSupplyRate(StrategyType(i));
-            y[i].stratType = StrategyType(i);
-        }
-        // ordering
-        _orderYields(y);
-        console.log("order 0 type apr", uint(y[0].stratType), y[0].apr / 1e23);
-        console.log("order 1 type apr", uint(y[1].stratType), y[1].apr / 1e23);
-        console.log("order 2 type apr", uint(y[2].stratType), y[2].apr / 1e23);
+    function _allocateFundsTo3Markets(
+        YieldVar[3] memory y,
+        ReservesVars memory r,
+        uint _amt
+    ) internal returns (uint _amount) {
+        // console.log("## ALLOCATE 3");
+        _amount = _amt;
         // attempt to bring 0 to 1 rate
         // TBD consider v3 supply cap
-        while (_amount != 0) {
+        bool _isBreak = false;
+        while (_amount != 0 && !_isBreak) {
+            console.log("ALLOC3 AMOUNT", _amount / 1e6);
+            if (_amount <= MINIMUM) {
+                (_amount, _isBreak) = _reachApr(
+                    y[0],
+                    r,
+                    y,
+                    _amount,
+                    _amount,
+                    true
+                );
+                break;
+            }
+
             if (lt(y[2].apr, y[1].apr) && lt(y[1].apr, y[0].apr)) {
-                console.log("CHECK 1");
+                console.log("ALLOC3 CHECK 1");
                 // i2 < i1 < i0
-                _amount = _reachApr(y[0], y[1], r, y, _amount);
+                (_amount, _isBreak) = _reachApr(
+                    y[0],
+                    y[1],
+                    r,
+                    y,
+                    _amount,
+                    true
+                );
             } else if (lt(y[2].apr, y[1].apr) && eq(y[1].apr, y[0].apr)) {
-                console.log("CHECK 2");
+                // console.log("CHECK 2");
                 // i2 < i1 = i0
-                uint _a0 = _aprToAmount(y[0], r, y[2].apr);
-                uint _a1 = _aprToAmount(y[1], r, y[2].apr);
+                uint _a0 = _aprToAmount(y[0], r, y[2].apr, true);
+                uint _a1 = _aprToAmount(y[1], r, y[2].apr, true);
                 if (_a0 + _a1 <= _amount) {
-                    console.log("CHECK 2_1");
-                    _amount = _reachApr(y[0], y[2], r, y, _amount);
-                    _amount = _reachApr(y[1], y[2], r, y, _amount);
+                    console.log("ALLOC3 CHECK 2_1");
+                    (_amount, _isBreak) = _reachApr(
+                        y[0],
+                        y[2],
+                        r,
+                        y,
+                        _amount,
+                        true
+                    );
+                    if (_isBreak) continue;
+                    (_amount, _isBreak) = _reachApr(
+                        y[1],
+                        y[2],
+                        r,
+                        y,
+                        _amount,
+                        true
+                    );
                 } else if (_a0 <= _amount) {
-                    console.log("CHECK 2_2");
-                    _amount = _reachApr(y[0], y[2], r, y, _amount);
+                    console.log("ALLOC3 CHECK 2_2");
+                    uint _eighth = _amount / 2;
+                    if (_eighth == 0) _eighth = _amount;
+
+                    (_amount, _isBreak) = _reachApr(
+                        y[1],
+                        r,
+                        y,
+                        _amount,
+                        _eighth,
+                        true
+                    );
                 } else if (_a1 <= _amount) {
-                    console.log("CHECK 2_3");
-                    _amount = _reachApr(y[1], y[2], r, y, _amount);
+                    console.log("ALLOC3 CHECK 2_3");
+                    uint _half = _amount / 2;
+                    if (_half == 0) _half = _amount;
+
+                    (_amount, _isBreak) = _reachApr(
+                        y[0],
+                        r,
+                        y,
+                        _amount,
+                        _half,
+                        true
+                    );
                 } else {
-                    console.log("CHECK 2_4");
-                    uint _third = _amount / 7;
+                    console.log("ALLOC3 CHECK 2_4");
+                    uint _third = _amount / 6;
                     if (_third == 0) _third = _amount;
-                    _amount = _reachApr(y[0], r, y, _amount, _third);
+                    (_amount, _isBreak) = _reachApr(
+                        y[0],
+                        r,
+                        y,
+                        _amount,
+                        _third,
+                        true
+                    );
                 }
             } else if (eq(y[2].apr, y[1].apr) && lt(y[1].apr, y[0].apr)) {
-                console.log("CHECK 3");
+                // console.log("CHECK 3");
                 // i2 = i1 < i0
-                _amount = _reachApr(y[0], y[1], r, y, _amount);
+                (_amount, _isBreak) = _reachApr(
+                    y[0],
+                    y[1],
+                    r,
+                    y,
+                    _amount,
+                    true
+                );
             } else {
                 console.log(
-                    "CHECK 4",
+                    "ALLOC3 CHECK 4",
                     y[0].apr / 1e23,
                     y[1].apr / 1e23,
                     y[2].apr / 1e23
                 );
 
                 console.log(
-                    "CHECK amt",
+                    // "CHECK amt",
                     y[0].amt / 1e6,
                     y[1].amt / 1e6,
                     y[2].amt / 1e6
                 );
                 // i2 = i1 = i0
-                uint _forth = _amount / 8;
-                if (_forth == 0) _forth = _amount;
-                _amount = _reachApr(y[0], r, y, _amount, _forth);
-            }
-        }
-
-        // deploy respective amounts for each market
-        for (uint i; i < 3; i++) {
-            uint _amt = y[i].amt;
-            if (_amt > 0) {
-                console.log(
-                    "allocate type amt:",
-                    uint(y[i].stratType),
-                    _amt / 1e6
+                // pick slowest
+                uint _eighth = _amount / 8;
+                if (_eighth == 0) _eighth = _amount;
+                (_amount, _isBreak) = _reachApr(
+                    y[0],
+                    r,
+                    y,
+                    _amount,
+                    _eighth,
+                    true
                 );
-                _deposit(y[i].stratType, _amt);
             }
         }
     }
 
-    function _disallocateFundsTo2Markets(uint _amount) internal {
-        //
+    function _disallocateFundsFrom2Markets(
+        YieldVar[3] memory y,
+        ReservesVars memory r,
+        uint _amt
+    ) internal returns (uint _amount) {
+        // console.log("## DISALLOCATE 2");
+        _amount = _amt;
+        bool _isBreak = false;
+        while (_amount != 0 && !_isBreak) {
+            console.log("DISALLOC2 AMOUNT", _amount / 1e6);
+            if (_amount <= MINIMUM) {
+                (_amount, _isBreak) = _reachApr(
+                    y[1],
+                    r,
+                    y,
+                    _amount,
+                    _amount,
+                    false
+                );
+                break;
+            }
+
+            if (lt(y[1].apr, y[0].apr)) {
+                console.log("DISALLOC2 CHECK 1");
+                // i1 < i0
+                (_amount, _isBreak) = _reachApr(
+                    y[1],
+                    y[0],
+                    r,
+                    y,
+                    _amount,
+                    false
+                );
+            } else {
+                // pick fastest
+                console.log("DISALLOC2 CHECK 2");
+                // i1 = i0
+                uint _seventh = _amount / 7;
+                if (_seventh == 0) _seventh = _amount;
+
+                (_amount, _isBreak) = _reachApr(
+                    y[1],
+                    r,
+                    y,
+                    _amount,
+                    _seventh,
+                    false
+                );
+            }
+        }
     }
 
-    function _disallocateFundsTo3Markets(uint _amount) internal {
+    function _disallocateFundsFrom3Markets(
+        YieldVar[3] memory y,
+        ReservesVars memory r,
+        uint _amt
+    ) internal returns (uint _amount) {
         //
+        // console.log("## DISALLOCATE 3");
+        _amount = _amt;
+        bool _isBreak = false;
+
+        while (_amount != 0 && !_isBreak) {
+            console.log("DISALLOC3 AMOUNT", _amount / 1e6);
+            if (_amount <= MINIMUM) {
+                (_amount, _isBreak) = _reachApr(
+                    y[2],
+                    r,
+                    y,
+                    _amount,
+                    _amount,
+                    false
+                );
+                break;
+            }
+
+            if (lt(y[2].apr, y[1].apr) && lt(y[1].apr, y[0].apr)) {
+                // i2 < i1 < i0
+                console.log("DISALLOC3 CHECK 1");
+                // _amount = _reachApr(y[2], y[1], r, y, _amount, false);
+
+                (_amount, _isBreak) = _reachApr(
+                    y[2],
+                    y[1],
+                    r,
+                    y,
+                    _amount,
+                    false
+                );
+            } else if (lt(y[2].apr, y[1].apr) && eq(y[1].apr, y[0].apr)) {
+                // i2 < i1 = i0
+                console.log("DISALLOC3 CHECK 2");
+                // _amount = _reachApr(y[2], y[1], r, y, _amount, false);
+
+                (_amount, _isBreak) = _reachApr(
+                    y[2],
+                    y[1],
+                    r,
+                    y,
+                    _amount,
+                    false
+                );
+            } else if (eq(y[2].apr, y[1].apr) && lt(y[1].apr, y[0].apr)) {
+                // i2 = i1 < i0
+                // console.log("DISALLOC3 CHECK 3");
+                uint _a1 = _aprToAmount(y[1], r, y[0].apr, false);
+                uint _a2 = _aprToAmount(y[2], r, y[0].apr, false);
+                if (_a2 + _a1 <= _amount) {
+                    console.log("DISALLOC3 CHECK 3_1");
+                    (_amount, _isBreak) = _reachApr(
+                        y[1],
+                        y[0],
+                        r,
+                        y,
+                        _amount,
+                        false
+                    );
+                    (_amount, _isBreak) = _reachApr(
+                        y[2],
+                        y[0],
+                        r,
+                        y,
+                        _amount,
+                        false
+                    );
+
+                    (_amount, _isBreak) = _reachApr(
+                        y[1],
+                        y[0],
+                        r,
+                        y,
+                        _amount,
+                        false
+                    );
+                    if (_isBreak) continue;
+                    (_amount, _isBreak) = _reachApr(
+                        y[2],
+                        y[0],
+                        r,
+                        y,
+                        _amount,
+                        false
+                    );
+                } else if (_a2 <= _amount) {
+                    console.log("DISALLOC3 CHECK 3_2");
+                    // _amount = _reachApr(y[1], y[0], r, y, _amount, false);
+
+                    uint _eighth = _amount / 2;
+                    if (_eighth == 0) _eighth = _amount;
+
+                    (_amount, _isBreak) = _reachApr(
+                        y[1],
+                        r,
+                        y,
+                        _amount,
+                        _eighth,
+                        false
+                    );
+                } else if (_a1 <= _amount) {
+                    console.log("DISALLOC3 CHECK 3_3");
+                    // _amount = _reachApr(y[2], y[0], r, y, _amount, false);
+
+                    uint _eighth = _amount / 2;
+                    if (_eighth == 0) _eighth = _amount;
+
+                    (_amount, _isBreak) = _reachApr(
+                        y[2],
+                        r,
+                        y,
+                        _amount,
+                        _eighth,
+                        false
+                    );
+                } else {
+                    console.log("DISALLOC3 CHECK 3_4");
+                    uint _third = _amount / 6;
+                    if (_third == 0) _third = _amount;
+                    (_amount, _isBreak) = _reachApr(
+                        y[1],
+                        r,
+                        y,
+                        _amount,
+                        _third,
+                        false
+                    );
+                }
+            } else {
+                console.log("DISALLOC3 CHECK 4");
+                // i2 = i1 = i0
+                // pick fastest
+                uint _eighth = _amount / 8;
+                if (_eighth == 0) _eighth = _amount;
+                (_amount, _isBreak) = _reachApr(
+                    y[0],
+                    r,
+                    y,
+                    _amount,
+                    _eighth,
+                    false
+                );
+            }
+        }
     }
 
     // TBD
     function _amountToApr(
         YieldVar memory _y,
         ReservesVars memory _r,
-        uint _amount
+        uint _amount,
+        bool _isDeposit
     ) public view returns (uint _apr) {
         if (_y.stratType == StrategyType.COMPOUND) {
             _apr = _compAprAdapter(
-                _compAmountToSupplyRate(_r.c, _amount),
+                _compAmountToSupplyRate(_r.c, _amount, _isDeposit),
                 true
             );
-            console.log("_apr c", _apr / 1e23);
+            // console.log("_apr c", _apr / 1e23);
         } else if (_y.stratType == StrategyType.AAVE_V2) {
-            _apr = uint(_calcAaveApr(_r.v2, int256(_amount)));
-            console.log("_apr v2", _apr / 1e23);
+            _apr = uint(_calcAaveApr(_r.v2, int256(_amount), _isDeposit));
+            // console.log("_apr v2", _apr / 1e23);
         } else if (_y.stratType == StrategyType.AAVE_V3) {
-            _apr = uint(_calcAaveApr(_r.v3, int256(_amount)));
-            console.log("_apr v3", _apr / 1e23);
+            _apr = uint(_calcAaveApr(_r.v3, int256(_amount), _isDeposit));
+            // console.log("_apr v3", _apr / 1e23);
         }
     }
 
     function _aprToAmount(
         YieldVar memory _y,
         ReservesVars memory _r,
-        uint _apr
+        uint _apr,
+        bool _isDeposit
     ) public view returns (uint _amount) {
         if (_y.stratType == StrategyType.COMPOUND) {
-            _amount = _calcCompoundInterestToAmount(_r.c, _apr);
-            console.log("comp", _amount / 1e6);
+            _amount = _calcCompoundInterestToAmount(_r.c, _apr, _isDeposit);
+            // console.log("comp", _amount / 1e6);
         } else if (_y.stratType == StrategyType.AAVE_V2) {
-            _amount = _calcAaveInterestToAmount(_r.v2, int(_apr));
-            console.log("aaveV2", _amount / 1e6);
+            _amount = _calcAaveInterestToAmount(_r.v2, int(_apr), _isDeposit);
+            // console.log("aaveV2", _amount / 1e6);
         } else if (_y.stratType == StrategyType.AAVE_V3) {
-            _amount = _calcAaveInterestToAmount(_r.v3, int(_apr));
-            console.log("aaveV3", _amount / 1e6);
-        } else {
-            revert("invalid");
+            _amount = _calcAaveInterestToAmount(_r.v3, int(_apr), _isDeposit);
+            // console.log("aaveV3", _amount / 1e6);
         }
-        console.log("input rate:", _apr / 1e23, _amount / 1e6);
+        // console.log("input rate:", _apr / 1e23, _amount / 1e6);
     }
 
     function _calcAaveInterestToAmount(
         AaveVars memory v,
-        int _apr
+        int _apr,
+        bool _isDeposit
     ) public view returns (uint _amount) {
         // console.log("---------------");
         int _amount0 = int(abs(_calcAmount(v, true, _apr)));
         // console.log("---------------");
         int _amount1 = int(abs(_calcAmount(v, false, _apr)));
         // console.log("---------------");
-        int sr0 = _calcAaveApr(v, _amount0);
-        int sr1 = _calcAaveApr(v, _amount1);
+        int sr0 = _calcAaveApr(v, _amount0, _isDeposit);
+        int sr1 = _calcAaveApr(v, _amount1, _isDeposit);
 
         // console.log("aave amount0", uint(_amount0), uint(_amount0) / 1e6);
         // console.log("aave amount1", uint(_amount1), uint(_amount1) / 1e6);
@@ -863,11 +1340,26 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
         _amount = abs(_apr - sr0) < abs(_apr - sr1)
             ? uint(_amount0)
             : uint(_amount1);
-        console.log("aave amount", uint(_amount) / 1e6);
+        // console.log("aave amount", uint(_amount) / 1e6);
     }
 
     // used by gelato checker, to determine if it needs to be called
     function status() external view returns (bool _keeperStatus) {
         return (_isKeeperActive);
+    }
+
+    function printAprs() external view {
+        console.log(
+            "RATE COMPOUND:",
+            _getSupplyRate(StrategyType.COMPOUND) / 1e23
+        );
+        console.log(
+            "RATE AAVE V2:",
+            _getSupplyRate(StrategyType.AAVE_V2) / 1e23
+        );
+        console.log(
+            "RATE AAVE V3:",
+            _getSupplyRate(StrategyType.AAVE_V3) / 1e23
+        );
     }
 }
