@@ -335,28 +335,6 @@ contract USDCStrategyTest is OptimizerSetup {
     //     strat.deployToMarket(_highest);
     // }
 
-    // function test_recoverERC20(uint256 _amount) public {
-    //     super.setUp();
-    //     vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
-    //     ERC20Mock mock = new ERC20Mock(
-    //         "mock",
-    //         "mock",
-    //         address(strategy),
-    //         _amount
-    //     );
-    //     USDCStrategy strat = USDCStrategy(address(strategy));
-
-    //     vm.prank(management);
-    //     strat.recoverERC20(address(mock), management);
-    //     assertEq(mock.balanceOf(management), _amount);
-    //     vm.startPrank(management);
-    //     for (uint i; i < tokens.length; i++) {
-    //         vm.expectRevert();
-    //         strat.recoverERC20(tokens[i], management);
-    //     }
-    //     vm.stopPrank();
-    // }
-
     // function test_rateChange() public {
     //     super.setUp();
     //     uint _amount = 1_000_000 * 1e6;
