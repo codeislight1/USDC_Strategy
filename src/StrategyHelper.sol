@@ -438,6 +438,14 @@ contract StrategyHelper {
         }
     }
 
+    function getSlowest(
+        YieldVar memory a,
+        YieldVar memory b,
+        YieldVar memory c
+    ) internal pure returns (YieldVar memory slowest) {
+        return getSlowest(getSlowest(a, b), getSlowest(b, c));
+    }
+
     // order slower to fastest: C,v2,v3
     function getFastest(
         YieldVar memory a,
@@ -451,6 +459,14 @@ contract StrategyHelper {
         } else {
             fastest = a.stratType == StrategyType.AAVE_V2 ? a : b;
         }
+    }
+
+    function getFastest(
+        YieldVar memory a,
+        YieldVar memory b,
+        YieldVar memory c
+    ) internal pure returns (YieldVar memory slowest) {
+        return getFastest(getFastest(a, b), getFastest(b, c));
     }
 
     function findMarketWithLiquidityLeft(

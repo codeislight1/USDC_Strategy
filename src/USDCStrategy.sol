@@ -416,30 +416,34 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
         if (_totalMarkets == 3) {
             // console.log("3Markets");
             // 3 can turn into 2
-            _amount = _allocateFundsTo3Markets(y, r, _amount); // might reach cap
-            if (_amount != 0) _amount = _allocateFundsTo2Markets(y, r, _amount);
-            // won't be neede for this strategy but would be needed for others
-            if (_amount != 0)
-                _allocateFundsTo1Market(
+
+            _amount = _adjustFundsFor3Markets(y, r, _amount, true); // might reach cap
+            if (_amount > 0)
+                _amount = _adjustFundsFor2Markets(y, r, _amount, true);
+            // won't be neede for this strategy but might be needed for others
+            if (_amount > 0) {
+                console.log("## ALLOCATE 1", _amount / 1e6);
+                _adjustFor1Market(
                     findMarketWithLiquidityLeft(y, _amount),
                     _amount
                 );
+            }
         } else if (_totalMarkets == 2) {
             // console.log("2Markets");
             // 2 can turn into 1
-            _amount = _allocateFundsTo2Markets(y, r, _amount); // might reach cap
-            if (_amount != 0)
-                _allocateFundsTo1Market(
+            _amount = _adjustFundsFor2Markets(y, r, _amount, true); // might reach cap
+            if (_amount > 0) {
+                console.log("## ALLOCATE 1", _amount / 1e6);
+                _adjustFor1Market(
                     findMarketWithLiquidityLeft(y, _amount),
                     _amount
                 );
+            }
         } else if (_totalMarkets == 1) {
             // console.log("1Market");
             // 1 is a 1
-            _allocateFundsTo1Market(
-                findMarketWithLiquidityLeft(y, _amount),
-                _amount
-            );
+            console.log("## ALLOCATE 1", _amount / 1e6);
+            _adjustFor1Market(findMarketWithLiquidityLeft(y, _amount), _amount);
         } else {
             revert("No Markets Available");
         }
@@ -582,30 +586,34 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
         // 3
         if (_totalMarkets == 3) {
             //
-            _amount = _disallocateFundsFrom3Markets(y, r, _amount);
+
+            _amount = _adjustFundsFor3Markets(y, r, _amount, false);
             if (_amount > 0)
-                _amount = _disallocateFundsFrom2Markets(y, r, _amount);
+                _amount = _adjustFundsFor2Markets(y, r, _amount, false);
             console.log("apr0", y[0].apr);
             console.log("apr1", y[1].apr);
             console.log("apr2", y[2].apr);
-            if (_amount > 0)
-                _disallocateFundsFrom1Market(
+            if (_amount > 0) {
+                console.log("## DIS_ALLOCATE 1", _amount / 1e6);
+                _adjustFor1Market(
                     findMarketWithLiquidityLeft(y, _amount),
                     _amount
                 );
+            }
         } else if (_totalMarkets == 2) {
             //
-            _amount = _disallocateFundsFrom2Markets(y, r, _amount);
-            _disallocateFundsFrom1Market(
-                findMarketWithLiquidityLeft(y, _amount),
-                _amount
-            );
+            _amount = _adjustFundsFor2Markets(y, r, _amount, false);
+            if (_amount > 0) {
+                console.log("## DIS_ALLOCATE 1", _amount / 1e6);
+                _adjustFor1Market(
+                    findMarketWithLiquidityLeft(y, _amount),
+                    _amount
+                );
+            }
         } else if (_totalMarkets == 1) {
             // withdraw
-            _disallocateFundsFrom1Market(
-                findMarketWithLiquidityLeft(y, _amount),
-                _amount
-            );
+            console.log("## DIS_ALLOCATE 1", _amount / 1e6);
+            _adjustFor1Market(findMarketWithLiquidityLeft(y, _amount), _amount);
         } else {
             revert("No Markets Available");
         }
@@ -868,40 +876,218 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
         _amt = _amount;
     }
 
-    function _disallocateFundsFrom1Market(
-        YieldVar memory y,
-        uint _amount
-    ) internal view {
-        console.log("## DISALLOCATE 1", _amount / 1e6);
-        _addAmt(y, _amount);
-    }
-
-    function _allocateFundsTo1Market(
-        YieldVar memory y,
-        uint _amount
-    ) internal view {
+    function _adjustFor1Market(YieldVar memory y, uint _amount) internal view {
         console.log("## ALLOCATE 1", _amount / 1e6);
         _addAmt(y, _amount);
     }
 
-    function _allocateFundsTo2Markets(
+    // function _allocateFundsTo2Markets(
+    //     YieldVar[3] memory y,
+    //     ReservesVars memory r,
+    //     uint _amt
+    // ) internal view returns (uint _amount) {
+    //     // console.log("## ALLOCATE 2");
+    //     _amount = _amt;
+    //     bool _isBreak = false;
+    //     while (_amount != 0 && !_isBreak) {
+    //         console.log("ALOC2 AMOUNT", _amount / 1e6);
+    //         if (_amount <= MINIMUM) {
+    //             (_amount, _isBreak) = _reachApr(
+    //                 y[0],
+    //                 r,
+    //                 y,
+    //                 _amount,
+    //                 _amount,
+    //                 true
+    //             );
+    //             break;
+    //         }
+
+    //         if (lt(y[1].apr, y[0].apr)) {
+    //             console.log("ALLOC2 CHECK 1");
+    //             // i1 < i0
+    //             (_amount, _isBreak) = _reachApr(
+    //                 y[0],
+    //                 y[1],
+    //                 r,
+    //                 y,
+    //                 _amount,
+    //                 true
+    //             );
+    //         } else {
+    //             // i1 = i0
+    //             // pick slowest
+    //             YieldVar memory slowest = getSlowest(y[0], y[1]);
+    //             console.log("ALLOC2 CHECK 2");
+    //             uint _seventh = _amount / 7;
+    //             if (_seventh == 0) _seventh = _amount;
+
+    //             (_amount, _isBreak) = _reachApr(
+    //                 slowest,
+    //                 r,
+    //                 y,
+    //                 _amount,
+    //                 _seventh,
+    //                 true
+    //             );
+    //         }
+    //     }
+    // }
+
+    // TBD assigning by reference or value
+
+    // amount to be dpeloyed, should be current balance of USDC
+    // function _allocateFundsTo3Markets(
+    //     YieldVar[3] memory y,
+    //     ReservesVars memory r,
+    //     uint _amt
+    // ) internal view returns (uint _amount) {
+    //     // console.log("## ALLOCATE 3");
+    //     _amount = _amt;
+    //     // attempt to bring 0 to 1 rate
+    //     // TBD consider v3 supply cap
+    //     bool _isBreak = false;
+    //     while (_amount != 0 && !_isBreak) {
+    //         console.log("ALLOC3 AMOUNT", _amount / 1e6);
+    //         if (_amount <= MINIMUM) {
+    //             (_amount, _isBreak) = _reachApr(
+    //                 y[0],
+    //                 r,
+    //                 y,
+    //                 _amount,
+    //                 _amount,
+    //                 true
+    //             );
+    //             break;
+    //         }
+
+    //         if (
+    //             (lt(y[2].apr, y[1].apr) && lt(y[1].apr, y[0].apr)) ||
+    //             (eq(y[2].apr, y[1].apr) && lt(y[1].apr, y[0].apr))
+    //         ) {
+    //             console.log("ALLOC3 CHECK 1");
+    //             // i2 < i1 < i0 || i2 = i1 < i0
+    //             (_amount, _isBreak) = _reachApr(
+    //                 y[0],
+    //                 y[1],
+    //                 r,
+    //                 y,
+    //                 _amount,
+    //                 true
+    //             );
+    //         } else if (lt(y[2].apr, y[1].apr) && eq(y[1].apr, y[0].apr)) {
+    //             // console.log("CHECK 2");
+    //             // i2 < i1 = i0
+    //             uint _a0 = _aprToAmount(y[0], r, y[2].apr, true);
+    //             uint _a1 = _aprToAmount(y[1], r, y[2].apr, true);
+    //             if (_a0 + _a1 <= _amount) {
+    //                 console.log("ALLOC3 CHECK 2_1");
+    //                 YieldVar memory slowest = getSlowest(y[0], y[1]);
+    //                 (_amount, _isBreak) = _reachApr(
+    //                     slowest,
+    //                     y[2],
+    //                     r,
+    //                     y,
+    //                     _amount,
+    //                     true
+    //                 );
+    //                 if (_isBreak) continue;
+    //                 (_amount, _isBreak) = _reachApr(
+    //                     slowest.stratType == y[1].stratType ? y[0] : y[1],
+    //                     y[2],
+    //                     r,
+    //                     y,
+    //                     _amount,
+    //                     true
+    //                 );
+    //             } else if (_a0 <= _amount || _a1 <= _amount) {
+    //                 console.log("ALLOC3 CHECK 2_2");
+    //                 uint _l = _a0 < _a1 ? _a0 : _a1;
+    //                 uint _eighth = _l / 2;
+    //                 if (_eighth == 0) _eighth = _l;
+
+    //                 (_amount, _isBreak) = _reachApr(
+    //                     // y[_a0 < _a1 ? 0 : 1],
+    //                     getSlowest(y[0], y[1]),
+    //                     r,
+    //                     y,
+    //                     _amount,
+    //                     _eighth,
+    //                     true
+    //                 );
+    //             } else {
+    //                 console.log("ALLOC3 CHECK 2_4");
+    //                 //
+    //                 uint _l = _a0 < _a1 ? _a0 : _a1;
+    //                 uint _third = min(_amount, _l) / 2;
+    //                 console.log("values", _a0, _a1, _l);
+    //                 console.log("values", _amount, _third);
+
+    //                 if (_third == 0) _third = _l;
+    //                 (_amount, _isBreak) = _reachApr(
+    //                     // y[_a0 < _a1 ? 0 : 1],
+    //                     getSlowest(y[1], y[2]),
+    //                     r,
+    //                     y,
+    //                     _amount,
+    //                     _third,
+    //                     true
+    //                 );
+    //             }
+    //         } else {
+    //             console.log(
+    //                 "ALLOC3 CHECK 3",
+    //                 y[0].apr / 1e23,
+    //                 y[1].apr / 1e23,
+    //                 y[2].apr / 1e23
+    //             );
+
+    //             console.log(
+    //                 // "CHECK amt",
+    //                 y[0].amt / 1e6,
+    //                 y[1].amt / 1e6,
+    //                 y[2].amt / 1e6
+    //             );
+    //             // i2 = i1 = i0
+    //             // pick slowest
+    //             YieldVar memory slowest = getSlowest(
+    //                 getSlowest(y[0], y[1]),
+    //                 getSlowest(y[1], y[2])
+    //             );
+
+    //             uint _eighth = _amount / 20; // TBD 8
+    //             if (_eighth == 0) _eighth = _amount;
+    //             (_amount, _isBreak) = _reachApr(
+    //                 slowest,
+    //                 r,
+    //                 y,
+    //                 _amount,
+    //                 _eighth,
+    //                 true
+    //             );
+    //         }
+    //     }
+    // }
+
+    function _adjustFundsFor2Markets(
         YieldVar[3] memory y,
         ReservesVars memory r,
-        uint _amt
+        uint _amt,
+        bool _isDeposit
     ) internal view returns (uint _amount) {
-        // console.log("## ALLOCATE 2");
+        //
         _amount = _amt;
-        bool _isBreak = false;
+        bool _isBreak;
         while (_amount != 0 && !_isBreak) {
-            console.log("ALOC2 AMOUNT", _amount / 1e6);
+            console.log("ALOC2 AMOUNT isDeposit", _amount / 1e6, _isDeposit);
             if (_amount <= MINIMUM) {
                 (_amount, _isBreak) = _reachApr(
-                    y[0],
+                    y[_isDeposit ? 0 : 1],
                     r,
                     y,
                     _amount,
                     _amount,
-                    true
+                    _isDeposit
                 );
                 break;
             }
@@ -910,128 +1096,133 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
                 console.log("ALLOC2 CHECK 1");
                 // i1 < i0
                 (_amount, _isBreak) = _reachApr(
-                    y[0],
-                    y[1],
+                    y[_isDeposit ? 0 : 1],
+                    y[_isDeposit ? 1 : 0],
                     r,
                     y,
                     _amount,
-                    true
+                    _isDeposit
                 );
             } else {
-                // i1 = i0
-                // pick slowest
-                YieldVar memory slowest = getSlowest(y[0], y[1]);
+                //
+
+                YieldVar memory _to = _isDeposit
+                    ? getSlowest(y[0], y[1])
+                    : getFastest(y[0], y[1]);
                 console.log("ALLOC2 CHECK 2");
                 uint _seventh = _amount / 7;
                 if (_seventh == 0) _seventh = _amount;
 
                 (_amount, _isBreak) = _reachApr(
-                    slowest,
+                    _to,
                     r,
                     y,
                     _amount,
                     _seventh,
-                    true
+                    _isDeposit
                 );
             }
         }
     }
 
-    // TBD assigning by reference or value
-
-    // amount to be dpeloyed, should be current balance of USDC
-    function _allocateFundsTo3Markets(
+    function _adjustFundsFor3Markets(
         YieldVar[3] memory y,
         ReservesVars memory r,
-        uint _amt
+        uint _amt,
+        bool _isDeposit
     ) internal view returns (uint _amount) {
-        // console.log("## ALLOCATE 3");
+        //
         _amount = _amt;
-        // attempt to bring 0 to 1 rate
-        // TBD consider v3 supply cap
         bool _isBreak = false;
         while (_amount != 0 && !_isBreak) {
             console.log("ALLOC3 AMOUNT", _amount / 1e6);
             if (_amount <= MINIMUM) {
                 (_amount, _isBreak) = _reachApr(
-                    y[0],
+                    y[_isDeposit ? 0 : 2],
                     r,
                     y,
                     _amount,
                     _amount,
-                    true
+                    _isDeposit
                 );
                 break;
             }
 
             if (
                 (lt(y[2].apr, y[1].apr) && lt(y[1].apr, y[0].apr)) ||
-                (eq(y[2].apr, y[1].apr) && lt(y[1].apr, y[0].apr))
+                (eq(y[_isDeposit ? 2 : 1].apr, y[_isDeposit ? 1 : 0].apr) &&
+                    lt(y[_isDeposit ? 1 : 2].apr, y[_isDeposit ? 0 : 1].apr))
             ) {
+                // deposit  : i2 < i1 < i0 || i2 = i1 < i0
+                // withdraw : i2 < i1 < i0 || i2 < i1 = i0
                 console.log("ALLOC3 CHECK 1");
-                // i2 < i1 < i0 || i2 = i1 < i0
                 (_amount, _isBreak) = _reachApr(
-                    y[0],
-                    y[1],
+                    y[_isDeposit ? 0 : 2],
+                    y[1], // the one after either ends
                     r,
                     y,
                     _amount,
-                    true
+                    _isDeposit
                 );
-            } else if (lt(y[2].apr, y[1].apr) && eq(y[1].apr, y[0].apr)) {
-                // console.log("CHECK 2");
-                // i2 < i1 = i0
-                uint _a0 = _aprToAmount(y[0], r, y[2].apr, true);
-                uint _a1 = _aprToAmount(y[1], r, y[2].apr, true);
+            } else if (
+                lt(y[_isDeposit ? 2 : 1].apr, y[_isDeposit ? 1 : 0].apr) &&
+                eq(y[_isDeposit ? 1 : 2].apr, y[_isDeposit ? 0 : 1].apr)
+            ) {
+                uint _a0;
+                uint _a1;
+                if (_isDeposit) {
+                    _a0 = _aprToAmount(y[0], r, y[2].apr, true);
+                    _a1 = _aprToAmount(y[1], r, y[2].apr, true);
+                } else {
+                    // _a1
+                    _a0 = _aprToAmount(y[1], r, y[0].apr, false);
+                    // _a2
+                    _a1 = _aprToAmount(y[2], r, y[0].apr, false);
+                }
+
                 if (_a0 + _a1 <= _amount) {
+                    //
                     console.log("ALLOC3 CHECK 2_1");
-                    YieldVar memory slowest = getSlowest(y[0], y[1]);
+                    YieldVar memory chosen = _isDeposit
+                        ? getSlowest(y[0], y[1])
+                        : getFastest(y[1], y[2]);
                     (_amount, _isBreak) = _reachApr(
-                        slowest,
-                        y[2],
+                        chosen,
+                        y[_isDeposit ? 2 : 0],
                         r,
                         y,
                         _amount,
-                        true
+                        _isDeposit
                     );
                     if (_isBreak) continue;
                     (_amount, _isBreak) = _reachApr(
-                        slowest.stratType == y[1].stratType ? y[0] : y[1],
-                        y[2],
+                        chosen.stratType == y[1].stratType
+                            ? y[_isDeposit ? 0 : 2]
+                            : y[1],
+                        y[_isDeposit ? 2 : 0],
                         r,
                         y,
                         _amount,
-                        true
+                        _isDeposit
                     );
-                } else if (_a0 <= _amount) {
+                } else if (_a0 <= _amount || _a1 <= _amount) {
+                    //
                     console.log("ALLOC3 CHECK 2_2");
+                    YieldVar memory chosen = _isDeposit
+                        ? getSlowest(y[0], y[1])
+                        : getFastest(y[1], y[2]);
                     uint _l = _a0 < _a1 ? _a0 : _a1;
                     uint _eighth = _l / 2;
-                    if (_eighth == 0) _eighth = _amount;
+                    if (_eighth == 0) _eighth = _l;
 
                     (_amount, _isBreak) = _reachApr(
                         // y[_a0 < _a1 ? 0 : 1],
-                        getSlowest(y[0], y[1]),
+                        chosen,
                         r,
                         y,
                         _amount,
                         _eighth,
-                        true
-                    );
-                } else if (_a1 <= _amount) {
-                    console.log("ALLOC3 CHECK 2_3");
-                    uint _l = _a0 < _a1 ? _a0 : _a1;
-                    uint _half = _l / 2;
-                    if (_half == 0) _half = _l;
-
-                    (_amount, _isBreak) = _reachApr(
-                        // y[_a0 < _a1 ? 0 : 1],
-                        getSlowest(y[0], y[1]),
-                        r,
-                        y,
-                        _amount,
-                        _half,
-                        true
+                        _isDeposit
                     );
                 } else {
                     console.log("ALLOC3 CHECK 2_4");
@@ -1044,239 +1235,209 @@ contract USDCStrategy is BaseStrategy, StrategyHelper {
                     if (_third == 0) _third = _l;
                     (_amount, _isBreak) = _reachApr(
                         // y[_a0 < _a1 ? 0 : 1],
-                        getSlowest(y[1], y[2]),
+                        _isDeposit
+                            ? getSlowest(y[1], y[2])
+                            : getFastest(y[1], y[2]),
                         r,
                         y,
                         _amount,
                         _third,
-                        true
+                        _isDeposit
                     );
                 }
             } else {
-                console.log(
-                    "ALLOC3 CHECK 3",
-                    y[0].apr / 1e23,
-                    y[1].apr / 1e23,
-                    y[2].apr / 1e23
-                );
-
-                console.log(
-                    // "CHECK amt",
-                    y[0].amt / 1e6,
-                    y[1].amt / 1e6,
-                    y[2].amt / 1e6
-                );
-                // i2 = i1 = i0
-                // pick slowest
-                YieldVar memory slowest = getSlowest(
-                    getSlowest(y[0], y[1]),
-                    getSlowest(y[1], y[2])
-                );
-
+                //
+                YieldVar memory chosen = _isDeposit
+                    ? getSlowest(y[0], y[1], y[2])
+                    : getFastest(y[0], y[1], y[2]);
                 uint _eighth = _amount / 20; // TBD 8
                 if (_eighth == 0) _eighth = _amount;
                 (_amount, _isBreak) = _reachApr(
-                    slowest,
+                    chosen,
                     r,
                     y,
                     _amount,
                     _eighth,
-                    true
+                    _isDeposit
                 );
             }
         }
     }
 
-    function _disallocateFundsFrom2Markets(
-        YieldVar[3] memory y,
-        ReservesVars memory r,
-        uint _amt
-    ) internal view returns (uint _amount) {
-        // console.log("## DISALLOCATE 2");
-        _amount = _amt;
-        bool _isBreak = false;
-        while (_amount != 0 && !_isBreak) {
-            console.log("DISALLOC2 AMOUNT", _amount / 1e6);
-            if (_amount <= MINIMUM) {
-                (_amount, _isBreak) = _reachApr(
-                    y[1],
-                    r,
-                    y,
-                    _amount,
-                    _amount,
-                    false
-                );
-                break;
-            }
+    // function _disallocateFundsFrom2Markets(
+    //     YieldVar[3] memory y,
+    //     ReservesVars memory r,
+    //     uint _amt
+    // ) internal view returns (uint _amount) {
+    //     // console.log("## DISALLOCATE 2");
+    //     _amount = _amt;
+    //     bool _isBreak = false;
+    //     while (_amount != 0 && !_isBreak) {
+    //         console.log("DISALLOC2 AMOUNT", _amount / 1e6);
+    //         if (_amount <= MINIMUM) {
+    //             (_amount, _isBreak) = _reachApr(
+    //                 y[1],
+    //                 r,
+    //                 y,
+    //                 _amount,
+    //                 _amount,
+    //                 false
+    //             );
+    //             break;
+    //         }
 
-            if (lt(y[1].apr, y[0].apr)) {
-                console.log("DISALLOC2 CHECK 1");
-                // i1 < i0
-                (_amount, _isBreak) = _reachApr(
-                    y[1],
-                    y[0],
-                    r,
-                    y,
-                    _amount,
-                    false
-                );
-            } else {
-                // pick fastest
-                // i1 = i0
-                YieldVar memory fastest = getFastest(y[0], y[1]);
-                console.log("DISALLOC2 CHECK 2");
-                uint _seventh = _amount / 7;
-                if (_seventh == 0) _seventh = _amount;
+    //         if (lt(y[1].apr, y[0].apr)) {
+    //             console.log("DISALLOC2 CHECK 1");
+    //             // i1 < i0
+    //             (_amount, _isBreak) = _reachApr(
+    //                 y[1],
+    //                 y[0],
+    //                 r,
+    //                 y,
+    //                 _amount,
+    //                 false
+    //             );
+    //         } else {
+    //             // pick fastest
+    //             // i1 = i0
+    //             YieldVar memory fastest = getFastest(y[0], y[1]);
+    //             console.log("DISALLOC2 CHECK 2");
+    //             uint _seventh = _amount / 7;
+    //             if (_seventh == 0) _seventh = _amount;
 
-                (_amount, _isBreak) = _reachApr(
-                    // y[1],
-                    fastest,
-                    r,
-                    y,
-                    _amount,
-                    _seventh,
-                    false
-                );
-            }
-        }
-    }
+    //             (_amount, _isBreak) = _reachApr(
+    //                 // y[1],
+    //                 fastest,
+    //                 r,
+    //                 y,
+    //                 _amount,
+    //                 _seventh,
+    //                 false
+    //             );
+    //         }
+    //     }
+    // }
 
-    function _disallocateFundsFrom3Markets(
-        YieldVar[3] memory y,
-        ReservesVars memory r,
-        uint _amt
-    ) internal view returns (uint _amount) {
-        //
-        // console.log("## DISALLOCATE 3");
-        _amount = _amt;
-        bool _isBreak = false;
+    // function _disallocateFundsFrom3Markets(
+    //     YieldVar[3] memory y,
+    //     ReservesVars memory r,
+    //     uint _amt
+    // ) internal view returns (uint _amount) {
+    //     //
+    //     // console.log("## DISALLOCATE 3");
+    //     _amount = _amt;
+    //     bool _isBreak = false;
 
-        while (_amount != 0 && !_isBreak) {
-            console.log("DISALLOC3 AMOUNT", _amount / 1e6);
-            if (_amount <= MINIMUM) {
-                (_amount, _isBreak) = _reachApr(
-                    y[2],
-                    r,
-                    y,
-                    _amount,
-                    _amount,
-                    false
-                );
-                break;
-            }
+    //     while (_amount != 0 && !_isBreak) {
+    //         console.log("DISALLOC3 AMOUNT", _amount / 1e6);
+    //         if (_amount <= MINIMUM) {
+    //             (_amount, _isBreak) = _reachApr(
+    //                 y[2],
+    //                 r,
+    //                 y,
+    //                 _amount,
+    //                 _amount,
+    //                 false
+    //             );
+    //             break;
+    //         }
 
-            if (
-                (lt(y[2].apr, y[1].apr) && lt(y[1].apr, y[0].apr)) ||
-                (lt(y[2].apr, y[1].apr) && eq(y[1].apr, y[0].apr))
-            ) {
-                // i2 < i1 < i0 || i2 < i1 = i0
+    //         if (
+    //             (lt(y[2].apr, y[1].apr) && lt(y[1].apr, y[0].apr)) ||
+    //             (lt(y[2].apr, y[1].apr) && eq(y[1].apr, y[0].apr))
+    //         ) {
+    //             // i2 < i1 < i0 || i2 < i1 = i0
 
-                console.log("DISALLOC3 CHECK 1");
-                // _amount = _reachApr(y[2], y[1], r, y, _amount, false);
+    //             console.log("DISALLOC3 CHECK 1");
+    //             // _amount = _reachApr(y[2], y[1], r, y, _amount, false);
 
-                (_amount, _isBreak) = _reachApr(
-                    y[2],
-                    y[1],
-                    r,
-                    y,
-                    _amount,
-                    false
-                );
-            } else if (eq(y[2].apr, y[1].apr) && lt(y[1].apr, y[0].apr)) {
-                // i2 = i1 < i0
-                uint _a1 = _aprToAmount(y[1], r, y[0].apr, false);
-                uint _a2 = _aprToAmount(y[2], r, y[0].apr, false);
-                if (_a2 + _a1 <= _amount) {
-                    console.log("DISALLOC3 CHECK 2_1");
-                    YieldVar memory fastest = getFastest(y[1], y[2]);
+    //             (_amount, _isBreak) = _reachApr(
+    //                 y[2],
+    //                 y[1],
+    //                 r,
+    //                 y,
+    //                 _amount,
+    //                 false
+    //             );
+    //         } else if (eq(y[2].apr, y[1].apr) && lt(y[1].apr, y[0].apr)) {
+    //             // i2 = i1 < i0
+    //             uint _a1 = _aprToAmount(y[1], r, y[0].apr, false);
+    //             uint _a2 = _aprToAmount(y[2], r, y[0].apr, false);
+    //             if (_a2 + _a1 <= _amount) {
+    //                 console.log("DISALLOC3 CHECK 2_1");
+    //                 YieldVar memory fastest = getFastest(y[1], y[2]);
 
-                    (_amount, _isBreak) = _reachApr(
-                        fastest,
-                        y[0],
-                        r,
-                        y,
-                        _amount,
-                        false
-                    );
-                    if (_isBreak) continue;
-                    (_amount, _isBreak) = _reachApr(
-                        fastest.stratType == y[1].stratType ? y[2] : y[1],
-                        y[0],
-                        r,
-                        y,
-                        _amount,
-                        false
-                    );
-                } else if (_a2 <= _amount) {
-                    console.log("DISALLOC3 CHECK 2_2");
-                    // _amount = _reachApr(y[1], y[0], r, y, _amount, false);
-                    uint _l = _a2 < _a1 ? _a2 : _a1;
-                    uint _eighth = _l / 2;
-                    if (_eighth == 0) _eighth = _amount;
+    //                 (_amount, _isBreak) = _reachApr(
+    //                     fastest,
+    //                     y[0],
+    //                     r,
+    //                     y,
+    //                     _amount,
+    //                     false
+    //                 );
+    //                 if (_isBreak) continue;
+    //                 (_amount, _isBreak) = _reachApr(
+    //                     fastest.stratType == y[1].stratType ? y[2] : y[1],
+    //                     y[0],
+    //                     r,
+    //                     y,
+    //                     _amount,
+    //                     false
+    //                 );
+    //             } else if (_a2 <= _amount || _a1 <= _amount) {
+    //                 console.log("DISALLOC3 CHECK 2_2");
+    //                 // _amount = _reachApr(y[1], y[0], r, y, _amount, false);
+    //                 uint _l = _a2 < _a1 ? _a2 : _a1;
+    //                 uint _eighth = _l / 2;
+    //                 if (_eighth == 0) _eighth = _l;
 
-                    (_amount, _isBreak) = _reachApr(
-                        // y[_a2 < _a1 ? 2 : 1],
-                        getFastest(y[1], y[2]),
-                        r,
-                        y,
-                        _amount,
-                        _eighth,
-                        false
-                    );
-                } else if (_a1 <= _amount) {
-                    console.log("DISALLOC3 CHECK 2_3");
-                    // _amount = _reachApr(y[2], y[0], r, y, _amount, false);
-                    uint _l = _a2 < _a1 ? _a2 : _a1;
-                    uint _eighth = _l / 2;
-                    if (_eighth == 0) _eighth = _amount;
+    //                 (_amount, _isBreak) = _reachApr(
+    //                     // y[_a2 < _a1 ? 2 : 1],
+    //                     getFastest(y[1], y[2]),
+    //                     r,
+    //                     y,
+    //                     _amount,
+    //                     _eighth,
+    //                     false
+    //                 );
+    //             } else {
+    //                 console.log("DISALLOC3 CHECK 2_4");
+    //                 uint _l = _a2 < _a1 ? _a2 : _a1;
+    //                 uint _third = min(_amount, _l) / 2;
 
-                    (_amount, _isBreak) = _reachApr(
-                        // y[_a2 < _a1 ? 2 : 1],
-                        getFastest(y[1], y[2]),
-                        r,
-                        y,
-                        _amount,
-                        _eighth,
-                        false
-                    );
-                } else {
-                    console.log("DISALLOC3 CHECK 2_4");
-                    uint _l = _a2 < _a1 ? _a2 : _a1;
-                    uint _third = min(_amount, _l) / 2;
+    //                 if (_third == 0) _third = _l;
+    //                 (_amount, _isBreak) = _reachApr(
+    //                     // y[_a2 < _a1 ? 2 : 1],
+    //                     getFastest(y[1], y[2]),
+    //                     r,
+    //                     y,
+    //                     _amount,
+    //                     _third,
+    //                     false
+    //                 );
+    //             }
+    //         } else {
+    //             console.log("DISALLOC3 CHECK 3");
+    //             // i2 = i1 = i0
+    //             // pick fastest
+    //             YieldVar memory fastest = getFastest(
+    //                 getFastest(y[0], y[1]),
+    //                 getFastest(y[1], y[2])
+    //             );
 
-                    if (_third == 0) _third = _l;
-                    (_amount, _isBreak) = _reachApr(
-                        // y[_a2 < _a1 ? 2 : 1],
-                        getFastest(y[1], y[2]),
-                        r,
-                        y,
-                        _amount,
-                        _third,
-                        false
-                    );
-                }
-            } else {
-                console.log("DISALLOC3 CHECK 3");
-                // i2 = i1 = i0
-                // pick fastest
-                YieldVar memory fastest = getFastest(
-                    getFastest(y[0], y[1]),
-                    getFastest(y[1], y[2])
-                );
-
-                uint _eighth = _amount / 20; // TBD 8
-                if (_eighth == 0) _eighth = _amount;
-                (_amount, _isBreak) = _reachApr(
-                    fastest,
-                    r,
-                    y,
-                    _amount,
-                    _eighth,
-                    false
-                );
-            }
-        }
-    }
+    //             uint _eighth = _amount / 20; // TBD 8
+    //             if (_eighth == 0) _eighth = _amount;
+    //             (_amount, _isBreak) = _reachApr(
+    //                 fastest,
+    //                 r,
+    //                 y,
+    //                 _amount,
+    //                 _eighth,
+    //                 false
+    //             );
+    //         }
+    //     }
+    // }
 
     // used by gelato checker, to determine if it needs to be called
     function status() external view returns (bool _keeperStatus) {
