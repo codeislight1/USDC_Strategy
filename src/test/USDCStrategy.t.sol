@@ -491,23 +491,22 @@ contract USDCStrategyTest is OptimizerSetup {
     function test_deposit_withdraw_20M() public {
         super.setUp();
         USDCStrategy strat = USDCStrategy(address(strategy));
-        uint _amount = 20_000_000 * 1e6;
+        uint _amount = 10_000_000 * 1e6;
 
         strat.printAprs();
-        uint _pre = gasleft();
+
         mintAndDepositIntoStrategy(strategy, user, _amount);
-        uint _post = gasleft();
-        console.log("deposit gas consumed", _pre - _post);
+
         strat.printAprs();
 
         skip(1);
         console.log("--------------");
 
         // Withdraw all funds
-        _pre = gasleft();
+        uint _pre = gasleft();
         vm.prank(user);
-        strategy.redeem(_amount / 2, user, user);
-        _post = gasleft();
+        strategy.redeem((_amount * 9) / 10, user, user);
+        uint _post = gasleft();
         console.log("withdraw gas consumed", _pre - _post);
         console.log(
             "withdrawn amount",

@@ -320,7 +320,8 @@ contract StrategyHelper {
     ) internal view {
         //
         console.log(
-            "// updateVirtualReserve: amount isDeposit:",
+            "// updateVirtualReserve: reserveAmt amount isDeposit:",
+            _y.amt / 1e6,
             _amount / 1e6,
             isDeposit
         );
@@ -420,5 +421,112 @@ contract StrategyHelper {
         r = (r + x / r) >> 1; // Seven iterations should be enough
         uint256 r1 = x / r;
         return (r < r1 ? r : r1);
+    }
+
+    // order slower to fastest: C,v2,v3
+    function getSlowest(
+        YieldVar memory a,
+        YieldVar memory b
+    ) internal pure returns (YieldVar memory slowest) {
+        if (
+            a.stratType == StrategyType.COMPOUND ||
+            b.stratType == StrategyType.COMPOUND
+        ) {
+            slowest = a.stratType == StrategyType.COMPOUND ? a : b;
+        } else {
+            slowest = a.stratType == StrategyType.AAVE_V2 ? a : b;
+        }
+    }
+
+    // order slower to fastest: C,v2,v3
+    function getFastest(
+        YieldVar memory a,
+        YieldVar memory b
+    ) internal pure returns (YieldVar memory fastest) {
+        if (
+            a.stratType == StrategyType.AAVE_V3 ||
+            b.stratType == StrategyType.AAVE_V3
+        ) {
+            fastest = a.stratType == StrategyType.AAVE_V3 ? a : b;
+        } else {
+            fastest = a.stratType == StrategyType.AAVE_V2 ? a : b;
+        }
+    }
+
+    function findMarketWithLiquidityLeft(
+        YieldVar[3] memory y,
+        uint _amount
+    ) internal pure returns (YieldVar memory _y) {
+        for (uint i; i < 3; i++) {
+            if (y[i].limit >= _amount + y[i].amt) {
+                _y = y[i];
+                break;
+            }
+        }
+    }
+
+    // TBD
+    function _amountToApr(
+        YieldVar memory _y,
+        ReservesVars memory _r,
+        uint _amount,
+        bool _isDeposit
+    ) public pure returns (uint _apr) {
+        if (_y.stratType == StrategyType.COMPOUND) {
+            _apr = _compAprAdapter(
+                _compAmountToSupplyRate(_r.c, _amount, _isDeposit),
+                true
+            );
+            // console.log("_apr c", _apr / 1e23);
+        } else if (_y.stratType == StrategyType.AAVE_V2) {
+            _apr = uint(_calcAaveApr(_r.v2, int256(_amount), _isDeposit));
+            // console.log("_apr v2", _apr / 1e23);
+        } else if (_y.stratType == StrategyType.AAVE_V3) {
+            _apr = uint(_calcAaveApr(_r.v3, int256(_amount), _isDeposit));
+            // console.log("_apr v3", _apr / 1e23);
+        }
+    }
+
+    function _aprToAmount(
+        YieldVar memory _y,
+        ReservesVars memory _r,
+        uint _apr,
+        bool _isDeposit
+    ) public pure returns (uint _amount) {
+        if (_y.stratType == StrategyType.COMPOUND) {
+            _amount = _calcCompoundInterestToAmount(_r.c, _apr, _isDeposit);
+            // console.log("comp", _amount / 1e6);
+        } else if (_y.stratType == StrategyType.AAVE_V2) {
+            _amount = _calcAaveInterestToAmount(_r.v2, int(_apr), _isDeposit);
+            // console.log("aaveV2", _amount / 1e6);
+        } else if (_y.stratType == StrategyType.AAVE_V3) {
+            _amount = _calcAaveInterestToAmount(_r.v3, int(_apr), _isDeposit);
+            // console.log("aaveV3", _amount / 1e6);
+        }
+        // console.log("input rate:", _apr / 1e23, _amount / 1e6);
+    }
+
+    function _calcAaveInterestToAmount(
+        AaveVars memory v,
+        int _apr,
+        bool _isDeposit
+    ) public pure returns (uint _amount) {
+        // console.log("---------------");
+        int _amount0 = int(abs(_calcAmount(v, true, _apr)));
+        // console.log("---------------");
+        int _amount1 = int(abs(_calcAmount(v, false, _apr)));
+        // console.log("---------------");
+        int sr0 = _calcAaveApr(v, _amount0, _isDeposit);
+        int sr1 = _calcAaveApr(v, _amount1, _isDeposit);
+
+        // console.log("aave amount0", uint(_amount0), uint(_amount0) / 1e6);
+        // console.log("aave amount1", uint(_amount1), uint(_amount1) / 1e6);
+
+        // console.log("sr0", uint(sr0), uint(sr0) / 1e23);
+        // console.log("sr1", uint(sr1), uint(sr1) / 1e23);
+        _amount = abs(_apr - sr0) < abs(_apr - sr1)
+            ? uint(_amount0)
+            : uint(_amount1);
+        // console.log("aave amount", uint(_amount) / 1e6);
     }
 }
