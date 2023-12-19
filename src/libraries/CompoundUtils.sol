@@ -14,11 +14,12 @@ library CompoundUtils {
         return _isWrap ? (_apr * RAY) / COMP100APR : (_apr * COMP100APR) / RAY;
     }
 
-    function calcCompoundInterestToAmount(
+    function aprToAmount(
         CompoundVars memory v,
         uint _apr,
         bool isDeposit
     ) public pure returns (uint _amount) {
+        // unwrap
         _apr = compAprWrapper(_apr, false);
         int _s = int(_apr);
         uint _amount0 = MathUtils.abs((v.rsl * v.tB) / (_s - v.base) - v.tS);
@@ -28,20 +29,20 @@ library CompoundUtils {
                 v.tS
         );
 
-        uint _sr0 = compAmountToSupplyRate(v, _amount0, isDeposit);
-        uint _sr1 = compAmountToSupplyRate(v, _amount1, isDeposit);
+        uint _sr0 = amountToSupplyRate(v, _amount0, isDeposit);
+        uint _sr1 = amountToSupplyRate(v, _amount1, isDeposit);
         _amount = MathUtils.abs(_s - int(_sr0)) < MathUtils.abs(_s - int(_sr1))
             ? uint(_amount0)
             : uint(_amount1);
     }
 
-    function compAmountToSupplyRate(
+    function amountToSupplyRate(
         CompoundVars memory _v
     ) internal pure returns (uint) {
-        return compAmountToSupplyRate(_v, 0, true); // direction won't matter
+        return amountToSupplyRate(_v, 0, true); // direction won't matter
     }
 
-    function compAmountToSupplyRate(
+    function amountToSupplyRate(
         CompoundVars memory _v,
         uint _amount,
         bool isDeposit // if so increment otherwise decrement

@@ -7,7 +7,7 @@ import "./MathUtils.sol";
 
 library AaveUtils {
     //
-    function calcAaveApr(
+    function getApr(
         AaveVars memory v,
         int adjAmount,
         bool isDeposit // if so increment otherwise decrement
@@ -84,10 +84,10 @@ library AaveUtils {
         return overallBorrowRate;
     }
 
-    function calcAmount(
+    function getAmount(
         AaveVars memory v,
         bool isUgtOPT,
-        int lr
+        int lr // liquidity rate
     ) internal pure returns (int) {
         int u;
         int iR = int(R);
@@ -148,15 +148,15 @@ library AaveUtils {
         return (v.tD * iRa) / u - (v.aL + v.tD);
     }
 
-    function calcAaveInterestToAmount(
+    function aprToAmount(
         AaveVars memory v,
         int _apr,
         bool _isDeposit
     ) public pure returns (uint _amount) {
-        int _amount0 = int(MathUtils.abs(calcAmount(v, true, _apr)));
-        int _amount1 = int(MathUtils.abs(calcAmount(v, false, _apr)));
-        int sr0 = calcAaveApr(v, _amount0, _isDeposit);
-        int sr1 = calcAaveApr(v, _amount1, _isDeposit);
+        int _amount0 = int(MathUtils.abs(getAmount(v, true, _apr)));
+        int _amount1 = int(MathUtils.abs(getAmount(v, false, _apr)));
+        int sr0 = getApr(v, _amount0, _isDeposit);
+        int sr1 = getApr(v, _amount1, _isDeposit);
 
         _amount = MathUtils.abs(_apr - sr0) < MathUtils.abs(_apr - sr1)
             ? uint(_amount0)

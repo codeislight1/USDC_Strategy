@@ -17,32 +17,28 @@ library ReserveUtils {
         bool isDeposit
     ) internal view {
         //
-        console.log(
-            "// updateVirtualReserve: reserveAmt amount isDeposit:",
-            _y.amt / 1e6,
-            _amount / 1e6,
-            isDeposit
-        );
+        // console.log(
+        //     "// updateVirtualReserve: reserveAmt amount isDeposit:",
+        //     _y.amt / 1e6,
+        //     _amount / 1e6,
+        //     isDeposit
+        // );
         if (_y.stratType == StrategyType.COMPOUND) {
             if (isDeposit) _r.c.tS += int256(_amount);
             else _r.c.tS -= int256(_amount);
 
             _y.apr = CompoundUtils.compAprWrapper(
-                CompoundUtils.compAmountToSupplyRate(_r.c),
+                CompoundUtils.amountToSupplyRate(_r.c),
                 true
             );
         } else if (_y.stratType == StrategyType.AAVE_V2) {
             //
-            _y.apr = uint(
-                AaveUtils.calcAaveApr(_r.v2, int256(_amount), isDeposit)
-            );
+            _y.apr = uint(AaveUtils.getApr(_r.v2, int256(_amount), isDeposit));
             if (isDeposit) _r.v2.aL += int256(_amount);
             else _r.v2.aL -= int256(_amount);
         } else if (_y.stratType == StrategyType.AAVE_V3) {
             //
-            _y.apr = uint(
-                AaveUtils.calcAaveApr(_r.v3, int256(_amount), isDeposit)
-            );
+            _y.apr = uint(AaveUtils.getApr(_r.v3, int256(_amount), isDeposit));
             if (isDeposit) _r.v3.aL += int256(_amount);
             else _r.v3.aL -= int256(_amount);
         }
@@ -94,17 +90,13 @@ library ReserveUtils {
     ) public pure returns (uint _apr) {
         if (_y.stratType == StrategyType.COMPOUND) {
             _apr = CompoundUtils.compAprWrapper(
-                CompoundUtils.compAmountToSupplyRate(_r.c, _amount, _isDeposit),
+                CompoundUtils.amountToSupplyRate(_r.c, _amount, _isDeposit),
                 true
             );
         } else if (_y.stratType == StrategyType.AAVE_V2) {
-            _apr = uint(
-                AaveUtils.calcAaveApr(_r.v2, int256(_amount), _isDeposit)
-            );
+            _apr = uint(AaveUtils.getApr(_r.v2, int256(_amount), _isDeposit));
         } else if (_y.stratType == StrategyType.AAVE_V3) {
-            _apr = uint(
-                AaveUtils.calcAaveApr(_r.v3, int256(_amount), _isDeposit)
-            );
+            _apr = uint(AaveUtils.getApr(_r.v3, int256(_amount), _isDeposit));
         }
     }
 
@@ -115,23 +107,11 @@ library ReserveUtils {
         bool _isDeposit
     ) public pure returns (uint _amount) {
         if (_y.stratType == StrategyType.COMPOUND) {
-            _amount = CompoundUtils.calcCompoundInterestToAmount(
-                _r.c,
-                _apr,
-                _isDeposit
-            );
+            _amount = CompoundUtils.aprToAmount(_r.c, _apr, _isDeposit);
         } else if (_y.stratType == StrategyType.AAVE_V2) {
-            _amount = AaveUtils.calcAaveInterestToAmount(
-                _r.v2,
-                int(_apr),
-                _isDeposit
-            );
+            _amount = AaveUtils.aprToAmount(_r.v2, int(_apr), _isDeposit);
         } else if (_y.stratType == StrategyType.AAVE_V3) {
-            _amount = AaveUtils.calcAaveInterestToAmount(
-                _r.v3,
-                int(_apr),
-                _isDeposit
-            );
+            _amount = AaveUtils.aprToAmount(_r.v3, int(_apr), _isDeposit);
         }
         // console.log("input rate:", _apr / 1e23, _amount / 1e6);
     }

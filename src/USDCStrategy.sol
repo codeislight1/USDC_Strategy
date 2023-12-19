@@ -3,7 +3,7 @@ pragma solidity 0.8.18;
 import "forge-std/console.sol";
 import {BaseStrategy, ERC20} from "@tokenized-strategy/BaseStrategy.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "./StrategyHelper.sol";
+import "./StrategyCore.sol";
 import "./interfaces/IAaveV2.sol";
 import "./interfaces/IAaveV3.sol";
 import "./interfaces/ICompound.sol";
@@ -28,7 +28,7 @@ import "./interfaces/IVariableDebtToken.sol";
 
 // NOTE: To implement permissioned functions you can use the onlyManagement, onlyEmergencyAuthorized and onlyKeepers modifiers
 
-contract USDCStrategy is BaseStrategy, StrategyHelper {
+contract USDCStrategy is BaseStrategy, StrategyCore {
     using SafeERC20 for ERC20;
     using MathUtils for uint;
 

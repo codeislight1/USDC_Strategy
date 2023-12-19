@@ -17,7 +17,7 @@ import "./libraries/CompoundUtils.sol";
 import "./libraries/AaveUtils.sol";
 import "./libraries/ReserveUtils.sol";
 
-contract StrategyHelper {
+contract StrategyCore {
     using MathUtils for uint;
     using MathUtils for int;
     using YieldUtils for YieldVar;
@@ -163,7 +163,7 @@ contract StrategyHelper {
 
     // funds adjustment
     function _adjustFor1Market(YieldVar memory y, uint _amount) internal view {
-        console.log("## ALLOCATE 1", _amount / 1e6);
+        // console.log("## ALLOCATE 1", _amount / 1e6, uint(y.stratType));
         y.deployAmount(_amount);
     }
 
@@ -189,7 +189,7 @@ contract StrategyHelper {
             }
 
             if (y[1].apr.lt(y[0].apr)) {
-                console.log("ALLOC2 CHECK 1", _amount / 1e6, _isDeposit);
+                // console.log("ALLOC2 CHECK 1", _amount / 1e6, _isDeposit);
                 // i1 < i0
                 (_amount, _isBreak) = r.reachApr(
                     y[_isDeposit ? 0 : 1],
@@ -204,7 +204,7 @@ contract StrategyHelper {
                 YieldVar memory _to = _isDeposit
                     ? y[0].getSlowest(y[1])
                     : y[0].getFastest(y[1]);
-                console.log("ALLOC2 CHECK 2", _amount / 1e6, _isDeposit);
+                // console.log("ALLOC2 CHECK 2", _amount / 1e6, _isDeposit);
                 uint _seventh = _amount / 7;
                 if (_seventh == 0) _seventh = _amount;
 
@@ -247,7 +247,7 @@ contract StrategyHelper {
             ) {
                 // deposit  : i2 < i1 < i0 || i2 = i1 < i0
                 // withdraw : i2 < i1 < i0 || i2 < i1 = i0
-                console.log("ALLOC3 CHECK 1", _amount / 1e6);
+                // console.log("ALLOC3 CHECK 1", _amount / 1e6);
                 (_amount, _isBreak) = r.reachApr(
                     y[_isDeposit ? 0 : 2],
                     y[1], // the one after either ends
@@ -272,8 +272,7 @@ contract StrategyHelper {
                 }
 
                 if (_a0 + _a1 <= _amount) {
-                    //
-                    console.log("ALLOC3 CHECK 2_1", _amount / 1e6);
+                    // console.log("ALLOC3 CHECK 2_1", _amount / 1e6);
                     YieldVar memory chosen = _isDeposit
                         ? y[0].getSlowest(y[1])
                         : y[1].getFastest(y[2]);
@@ -295,30 +294,26 @@ contract StrategyHelper {
                         _isDeposit
                     );
                 } else if (_a0 <= _amount || _a1 <= _amount) {
-                    //
-                    console.log("ALLOC3 CHECK 2_2", _amount / 1e6);
+                    // console.log("ALLOC3 CHECK 2_2", _amount / 1e6);
                     YieldVar memory chosen = _isDeposit
                         ? y[0].getSlowest(y[1])
                         : y[1].getFastest(y[2]);
                     uint _l = _a0 < _a1 ? _a0 : _a1;
-                    uint _eighth = _l / 2;
-                    if (_eighth == 0) _eighth = _l;
+                    uint _portion = _l / 2;
+                    if (_portion == 0) _portion = _l;
 
                     (_amount, _isBreak) = r.reachApr(
                         // y[_a0 < _a1 ? 0 : 1],
                         chosen,
                         y,
                         _amount,
-                        _eighth,
+                        _portion,
                         _isDeposit
                     );
                 } else {
-                    console.log("ALLOC3 CHECK 2_3", _amount / 1e6);
-                    //
+                    // console.log("ALLOC3 CHECK 2_3", _amount / 1e6);
                     uint _l = _a0 < _a1 ? _a0 : _a1;
                     uint _third = _amount.min(_l) / 2;
-                    console.log("values", _a0, _a1, _l);
-                    console.log("values", _amount, _third);
 
                     if (_third == 0) _third = _l;
                     (_amount, _isBreak) = r.reachApr(
@@ -334,18 +329,18 @@ contract StrategyHelper {
                 }
             } else {
                 //
-                console.log("ALLOC3 CHECK 3", _amount / 1e6);
+                // console.log("ALLOC3 CHECK 3", _amount / 1e6);
                 YieldVar memory chosen = _isDeposit
                     ? y[0].getSlowest(y[1], y[2])
                     : y[0].getFastest(y[1], y[2]);
-                // 20: improve deposit rate e.g(D(3.39,3.39,3.46),W(4.5,5.56,6.29)), while other: e.g(D(2.55,3.28,3.64),W(3.64,5.57,10.72)) very gas efficient
-                uint _eighth = _amount / (_amount >= 10_000 * 1e6 ? 2 : 20); // TBD  (_amount >= 1_000_000 * 1e6 ? 2 : 20)
-                if (_eighth == 0) _eighth = _amount;
+                uint _portion = _amount / (_amount >= 10_000 * 1e6 ? 2 : 20); // pretty gas efficient
+                // uint _portion = _amount / 20; // less gas efficient but more accurate
+                if (_portion == 0) _portion = _amount;
                 (_amount, _isBreak) = r.reachApr(
                     chosen,
                     y,
                     _amount,
-                    _eighth,
+                    _portion,
                     _isDeposit
                 );
             }
@@ -426,7 +421,7 @@ contract StrategyHelper {
                 _adjustFor1Market(y.findLiquidMarket(_amount), _amount);
             }
         } else if (totalMarkets == 2) {
-            _amount = _adjustFundsFor2Markets(y, r, _amount, true); // might reach cap
+            _amount = _adjustFundsFor2Markets(y, r, _amount, isDeposit); // might reach cap
             if (_amount > 0) {
                 _adjustFor1Market(y.findLiquidMarket(_amount), _amount);
             }

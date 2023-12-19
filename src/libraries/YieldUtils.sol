@@ -27,8 +27,15 @@ library YieldUtils {
     function findLiquidMarket(
         YieldVar[3] memory y,
         uint _amount
-    ) internal pure returns (YieldVar memory _y) {
+    ) internal view returns (YieldVar memory _y) {
         for (uint i; i < 3; i++) {
+            console.log(
+                "mark",
+                uint(y[i].limit) / 1e6,
+                _amount / 1e6,
+                uint(y[i].amt) / 1e6
+            );
+            console.log("mark", uint(y[i].stratType));
             if (y[i].limit >= _amount + y[i].amt) {
                 _y = y[i];
                 break;
