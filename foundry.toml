@@ -12,6 +12,6 @@ remappings = [
 ]
 
 [rpc_endpoints]
-polygon = "https://polygon.llamarpc.com"
+polygon = "https://polygon.gateway.tenderly.co/LVcNwKgcIW6LkrKiMYYEV"
 
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config

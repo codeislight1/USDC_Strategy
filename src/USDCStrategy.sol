@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.18;
-
+import "forge-std/console.sol";
 import {BaseStrategy, ERC20} from "@tokenized-strategy/BaseStrategy.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "./StrategyCore.sol";
 import "./interfaces/IAaveV2.sol";
 import "./interfaces/IAaveV3.sol";
 import "./interfaces/ICompound.sol";
+import "./interfaces/IAaveV2InterestStrategy.sol";
+import "./interfaces/IAaveV3InterestStrategy.sol";
+import "./interfaces/IStableDebtToken.sol";
+import "./interfaces/IVariableDebtToken.sol";
+import "./libraries/YieldUtils.sol";
 
 // Import interfaces for many popular DeFi projects, or add your own!
 //import "../interfaces/<protocol>/<Interface>.sol";
@@ -23,43 +29,21 @@ import "./interfaces/ICompound.sol";
 
 // NOTE: To implement permissioned functions you can use the onlyManagement, onlyEmergencyAuthorized and onlyKeepers modifiers
 
-contract USDCStrategy is BaseStrategy {
+contract USDCStrategy is BaseStrategy, StrategyCore {
     using SafeERC20 for ERC20;
-
-    enum StrategyType {
-        IDLE,
-        COMPOUND,
-        AAVE_V2,
-        AAVE_V3
-    }
-
-    IAaveV2 constant aaveV2 =
-        IAaveV2(0x8dFf5E27EA6b7AC08EbFdf9eB090F32ee9a30fcf);
-    IAaveV3 constant aaveV3 =
-        IAaveV3(0x794a61358D6845594F94dc1DB02A252b5b4814aD);
-    ICompound constant compoundUSDC =
-        ICompound(0xF25212E676D1F7F89Cd72fFEe66158f541246445);
-
-    address constant USDC = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174; // USDC.e
-    address constant AAVE_V2_USDC = 0x1a13F4Ca1d028320A707D99520AbFefca3998b7F; // USDC.e
-    address constant AAVE_V3_USDC = 0x625E7708f30cA75bfd92586e17077590C60eb4cD; // USDC.e
-
-    uint constant COMP100APR = 317100000 * 100;
-    uint constant RAY = 1e27;
-
-    uint MAX_CAP_AAVE_V3 = 150_000_000e6;
-    uint public lastExecuted;
-
-    StrategyType public highest;
-    bool _isKeeperActive;
+    using MathUtils for uint;
+    using YieldUtils for YieldVar[3];
 
     constructor() BaseStrategy(USDC, "USDC strategy") {
+        // approve markets
         ERC20(USDC).approve(address(aaveV2), type(uint).max);
         ERC20(USDC).approve(address(aaveV3), type(uint).max);
-        ERC20(USDC).approve(address(compoundUSDC), type(uint).max);
+        ERC20(USDC).approve(address(COMP_USDC), type(uint).max);
 
-        highest = _getHighestYield();
-        lastExecuted = block.timestamp;
+        // load markets
+        _loadCompound();
+        _loadAaveV2(aaveV2.getReserveData(USDC).interestRateStrategyAddress);
+        _loadAaveV3(aaveV3.getReserveData(USDC).interestRateStrategyAddress);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -78,7 +62,7 @@ contract USDCStrategy is BaseStrategy {
      * to deposit in the yield source.
      */
     function _deployFunds(uint256 _amount) internal override {
-        _deposit(highest, _amount);
+        _deposit(_amount);
     }
 
     /**
@@ -103,11 +87,7 @@ contract USDCStrategy is BaseStrategy {
      * @param _amount, The amount of 'asset' to be freed.
      */
     function _freeFunds(uint256 _amount) internal override {
-        // uint _bal = ERC20(USDC).balanceOf(address(this));
-        // if (_bal < _amount) {
-        //     _withdraw(highest, _amount - _bal);
-        // }
-        _withdraw(highest, _amount);
+        _withdraw(_amount);
     }
 
     /**
@@ -138,7 +118,11 @@ contract USDCStrategy is BaseStrategy {
         override
         returns (uint256 _totalAssets)
     {
-        _totalAssets = _totalAmounts();
+        _totalAssets =
+            _balanceOfToken(T.U) +
+            _balanceOfToken(T.C) +
+            _balanceOfToken(T.A2) +
+            _balanceOfToken(T.A3);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -207,8 +191,20 @@ contract USDCStrategy is BaseStrategy {
 
     function availableDepositLimit(
         address
-    ) public pure override returns (uint256) {
-        return type(uint).max;
+    ) public view override returns (uint256) {
+        // C active ? third max : 0
+        // V2 active ? third max : 0
+        // V3 active ? limit - supply : 0
+        uint thirdMax = type(uint).max / 3; // uint.max / number of markets
+        uint v3_tS = ERC20(AAVE_V3_USDC).totalSupply();
+        uint v3_cap = _getV3SupplyCap();
+        uint v3Limit = v3_cap == 0
+            ? thirdMax
+            : (v3_cap > v3_tS ? v3_cap - v3_tS : 0);
+        return
+            (_isActive(StrategyType.COMPOUND) ? thirdMax : 0) +
+            (_isActive(StrategyType.AAVE_V2) ? thirdMax : 0) +
+            (_isActive(StrategyType.AAVE_V3) ? v3Limit : 0);
     }
 
     /**
@@ -236,23 +232,31 @@ contract USDCStrategy is BaseStrategy {
         address
     ) public view override returns (uint256) {
         return
-            ERC20(USDC).balanceOf(address(this)) +
-            min(
-                ERC20(address(compoundUSDC)).balanceOf(address(this)),
-                ERC20(USDC).balanceOf(address(compoundUSDC))
+            _balanceOfToken(T.U) +
+            (
+                _isActive(StrategyType.COMPOUND)
+                    ? _balanceOfToken(T.C).min(
+                        _balanceOfToken(T.U, address(COMP_USDC))
+                    )
+                    : 0
             ) +
-            min(
-                ERC20(AAVE_V2_USDC).balanceOf(address(this)),
-                ERC20(USDC).balanceOf(address(AAVE_V2_USDC))
+            (
+                _isActive(StrategyType.AAVE_V2)
+                    ? _balanceOfToken(T.A2).min(
+                        _balanceOfToken(T.U, AAVE_V2_USDC)
+                    )
+                    : 0
             ) +
-            min(
-                ERC20(AAVE_V3_USDC).balanceOf(address(this)),
-                ERC20(USDC).balanceOf(address(AAVE_V3_USDC))
+            (
+                _isActive(StrategyType.AAVE_V3)
+                    ? _balanceOfToken(T.A3).min(
+                        _balanceOfToken(T.U, AAVE_V3_USDC)
+                    )
+                    : 0
             );
     }
 
-    /**
-     * @dev Optional function for a strategist to override that will
+    /* @dev Optional function for a strategist to override that will
      * allow management to manually withdraw deployed funds from the
      * yield source if a strategy is shutdown.
      *
@@ -274,75 +278,57 @@ contract USDCStrategy is BaseStrategy {
      *
      */
     function _emergencyWithdraw(uint256 _amount) internal override {
-        _withdraw(highest, _amount);
+        _withdraw(_amount);
     }
 
-    function execute() external onlyKeepers {
-        StrategyType _highest = _getHighestYield();
-        if (highest != _highest) {
-            // withdraw
-            uint _amount = _getAmount(highest);
-            if (_amount > 0) _withdraw(highest, _amount);
-            // deposit
-            highest = _highest;
-            lastExecuted = block.timestamp;
-            _amount = ERC20(USDC).balanceOf(address(this));
-            if (_amount > 0) _deposit(_highest, _amount);
+    function _deposit(uint _amount) internal {
+        (
+            uint _totalMarkets,
+            ReservesVars memory r,
+            YieldVar[3] memory y
+        ) = _loadDataSimulation(true);
+
+        _simulate(true, _totalMarkets, _amount, r, y);
+
+        for (uint i; i < 3; i++) {
+            uint _amt = y[i].amt;
+            if (_amt > 0) {
+                console.log(
+                    "allocate type amt:",
+                    uint(y[i].stratType),
+                    _amt / 1e6
+                );
+                _deposit(y[i].stratType, _amt);
+            }
         }
     }
 
-    function setHighestYield(StrategyType _strategy) external onlyManagement {
-        if (highest != _strategy) {
-            // withdraw
-            uint _amount = _getAmount(highest);
-            if (_amount > 0) _withdraw(highest, _amount);
-            // deposit
-            highest = _strategy;
-            _amount = ERC20(USDC).balanceOf(address(this));
-            if (_amount > 0) _deposit(_strategy, _amount);
+    function _withdraw(uint _amount) internal {
+        (
+            uint _totalMarkets,
+            ReservesVars memory r,
+            YieldVar[3] memory y
+        ) = _loadDataSimulation(false);
+
+        _simulate(false, _totalMarkets, _amount, r, y);
+
+        // deploy respective amounts for each market
+        for (uint i = 0; i < 3; i++) {
+            uint _amt = y[i].amt;
+            if (_amt > 0) {
+                console.log(
+                    "disallocate type amt:",
+                    uint(y[i].stratType),
+                    _amt / 1e6
+                );
+                _withdraw(y[i].stratType, _amt);
+            }
         }
-    }
-
-    function freeFromMarket(StrategyType _strategy) external onlyManagement {
-        uint _amount = _getAmount(_strategy);
-        if (_amount > 0) _withdraw(_strategy, _amount);
-    }
-
-    function deployToMarket(StrategyType _strategy) external onlyManagement {
-        uint _amount = ERC20(USDC).balanceOf(address(this));
-        if (_amount > 0) _deposit(_strategy, _amount);
-    }
-
-    function recoverERC20(address _token, address _to) external onlyManagement {
-        require(
-            _token != USDC ||
-                _token != address(compoundUSDC) ||
-                _token != AAVE_V2_USDC ||
-                _token != AAVE_V2_USDC,
-            "!token"
-        );
-        ERC20(_token).transfer(_to, ERC20(_token).balanceOf(address(this)));
-    }
-
-    function setKepperActive(bool _active) external onlyManagement {
-        require(_isKeeperActive != _active);
-        _isKeeperActive = _active;
-    }
-
-    function _getAmount(
-        StrategyType _strategy
-    ) internal view returns (uint _amount) {
-        if (_strategy == StrategyType.COMPOUND)
-            _amount = ERC20(address(compoundUSDC)).balanceOf(address(this));
-        else if (_strategy == StrategyType.AAVE_V2)
-            _amount = ERC20(AAVE_V2_USDC).balanceOf(address(this));
-        else if (_strategy == StrategyType.AAVE_V3)
-            _amount = ERC20(AAVE_V3_USDC).balanceOf(address(this));
     }
 
     function _deposit(StrategyType _strategy, uint _amount) internal {
         if (_strategy == StrategyType.COMPOUND) {
-            compoundUSDC.supply(USDC, _amount);
+            COMP_USDC.supply(USDC, _amount);
         } else if (_strategy == StrategyType.AAVE_V2) {
             aaveV2.deposit(USDC, _amount, address(this), 0);
         } else if (_strategy == StrategyType.AAVE_V3) {
@@ -352,7 +338,7 @@ contract USDCStrategy is BaseStrategy {
 
     function _withdraw(StrategyType _strategy, uint _amount) internal {
         if (_strategy == StrategyType.COMPOUND) {
-            compoundUSDC.withdraw(USDC, _amount);
+            COMP_USDC.withdraw(USDC, _amount);
         } else if (_strategy == StrategyType.AAVE_V2) {
             aaveV2.withdraw(USDC, _amount, address(this));
         } else if (_strategy == StrategyType.AAVE_V3) {
@@ -360,63 +346,30 @@ contract USDCStrategy is BaseStrategy {
         }
     }
 
-    function _isActive(
-        StrategyType _strategy
-    ) internal view returns (bool _active) {
-        if (_strategy == StrategyType.COMPOUND) {
-            _active = !compoundUSDC.isSupplyPaused();
-        } else if (_strategy == StrategyType.AAVE_V2) {
-            uint _data = aaveV2.getReserveData(USDC).configuration.data;
-            _active = (((_data >> 56) & 1) == 1) && !(((_data >> 57) & 1) == 1);
-        } else if (_strategy == StrategyType.AAVE_V3) {
-            uint _data = aaveV3.getReserveData(USDC).configuration.data;
-            uint _supplyCap = ((_data >> 116) & 68719476735) * 10 ** 6;
-            _active =
-                (((_data >> 56) & 1) == 1) &&
-                !(((_data >> 57) & 1) == 1) &&
-                !(((_data >> 60) & 1) == 1) &&
-                ERC20(AAVE_V3_USDC).totalSupply() < _supplyCap;
-        }
+    // Only Management
+    function freeFromMarket(StrategyType _strategy) external onlyManagement {
+        uint _amount = _balanceOfToken(T(uint8(_strategy) + 1));
+        if (_amount > 0) _withdraw(_amount);
     }
 
-    function _totalAmounts() internal view returns (uint256 _totalAssets) {
-        _totalAssets =
-            ERC20(USDC).balanceOf(address(this)) +
-            ERC20(address(compoundUSDC)).balanceOf(address(this)) +
-            ERC20(AAVE_V2_USDC).balanceOf(address(this)) +
-            ERC20(AAVE_V3_USDC).balanceOf(address(this));
+    function deployToMarket(StrategyType _strategy) external onlyManagement {
+        uint _amount = _balanceOfToken(T.U);
+        if (_amount > 0) _deposit(_strategy, _amount);
     }
 
-    function _getHighestYield() internal view returns (StrategyType _highest) {
+    function maintain() external onlyKeepers {
+        // withdraw all assets
+        uint bal;
         // compound
-        uint _supplyRate = (compoundUSDC.getSupplyRate(
-            compoundUSDC.getUtilization()
-        ) * RAY) / COMP100APR;
-        uint _maxRate = _supplyRate;
-        if (_isActive(StrategyType.COMPOUND)) _highest = StrategyType.COMPOUND;
-        // Aave V2
-        _supplyRate = aaveV2.getReserveData(USDC).currentLiquidityRate;
-        if (_supplyRate > _maxRate && _isActive(StrategyType.AAVE_V2)) {
-            _highest = StrategyType.AAVE_V2;
-            _maxRate = _supplyRate;
-        }
-        // Aave V3
-        _supplyRate = aaveV3.getReserveData(USDC).currentLiquidityRate;
-        if (_supplyRate > _maxRate && _isActive(StrategyType.AAVE_V3)) {
-            _highest = StrategyType.AAVE_V3;
-        }
-    }
-
-    // used by gelato checker, to determine if it needs to be called
-    function status()
-        external
-        view
-        returns (bool _isYieldChanged, bool _keeperStatus)
-    {
-        return (highest != _getHighestYield(), _isKeeperActive);
-    }
-
-    function min(uint a, uint b) internal pure returns (uint) {
-        return a < b ? a : b;
+        bal = _balanceOfToken(T.C);
+        if (bal > 0) _withdraw(StrategyType.COMPOUND, bal);
+        // aave v2
+        bal = _balanceOfToken(T.A2);
+        if (bal > 0) _withdraw(StrategyType.AAVE_V2, bal);
+        // aave v3
+        bal = _balanceOfToken(T.A3);
+        if (bal > 0) _withdraw(StrategyType.AAVE_V3, bal);
+        bal = _balanceOfToken(T.U);
+        _deposit(bal);
     }
 }

@@ -96,8 +96,11 @@ contract OptimizerSetup is ExtendedTest, IEvents {
         vm.prank(_user);
         asset.approve(address(_strategy), _amount);
 
+        uint _pre = gasleft();
         vm.prank(_user);
         _strategy.deposit(_amount, _user);
+        uint _post = gasleft();
+        console.log("deposit gas:", _pre - _post);
     }
 
     function mintAndDepositIntoStrategy(
