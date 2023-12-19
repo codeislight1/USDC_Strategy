@@ -164,6 +164,7 @@ contract StrategyCore {
     // funds adjustment
     function _adjustFor1Market(YieldVar memory y, uint _amount) internal view {
         // console.log("## ALLOCATE 1", _amount / 1e6, uint(y.stratType));
+        console.log("adjust 1", _amount / 1e6);
         y.deployAmount(_amount);
     }
 
@@ -174,6 +175,7 @@ contract StrategyCore {
         bool _isDeposit
     ) internal view returns (uint _amount) {
         //
+        console.log("adjust 2", _amt / 1e6);
         _amount = _amt;
         bool _isBreak;
         while (_amount != 0 && !_isBreak) {
@@ -226,6 +228,7 @@ contract StrategyCore {
         bool _isDeposit
     ) internal view returns (uint _amount) {
         //
+        console.log("adjust 3", _amount / 1e6);
         _amount = _amt;
         bool _isBreak = false;
         while (_amount != 0 && !_isBreak) {
@@ -461,7 +464,7 @@ contract StrategyCore {
                     _balanceOfToken(T.U, address(AAVE_V2_USDC)).min(
                         _balanceOfToken(T.A2)
                     )
-                ); // no limit
+                );
             i++;
         }
 

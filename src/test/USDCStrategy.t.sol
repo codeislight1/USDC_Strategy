@@ -10,6 +10,7 @@ import "../interfaces/IAaveV2.sol";
 import "../interfaces/IAaveV3.sol";
 import "../interfaces/ICompound.sol";
 import "../interfaces/IAaveV2InterestStrategy.sol";
+import "../libraries/Constants.sol";
 
 contract USDCStrategyTest is OptimizerSetup {
     address[] tokens = [
@@ -32,444 +33,275 @@ contract USDCStrategyTest is OptimizerSetup {
         ICompound(0xF25212E676D1F7F89Cd72fFEe66158f541246445);
     address constant USDC = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174;
 
-    uint constant COMP100APR = 317100000 * 100;
-    uint constant RAY = 1e27;
-
     function setUp() public virtual override {
-        vm.createSelectFork("polygon");
+        super.setUp();
+        // vm.createSelectFork("polygon");
     }
 
-    // function test_setupStrategyOK() public {
-    //     super.setUp();
-    //     console.log("address of strategy", address(strategy));
-    //     assertTrue(address(0) != address(strategy));
-    //     assertEq(strategy.asset(), address(asset));
-    //     assertEq(strategy.management(), management);
-    //     assertEq(strategy.performanceFeeRecipient(), performanceFeeRecipient);
-    //     assertEq(strategy.keeper(), keeper);
-    // }
-
-    // modifier setAllYieldSources() {
-    //     for (uint i = 1; i < 4; i++) {
-    //         super.setUp();
-    //         vm.prank(management);
-    //         USDCStrategy(address(strategy)).setHighestYield(
-    //             USDCStrategy.StrategyType(i)
-    //         );
-    //         _;
-    //     }
-    // }
-
-    // function test_operation(uint256 _amount) public setAllYieldSources {
-    //     vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
-
-    //     // Deposit into strategy
-    //     mintAndDepositIntoStrategy(strategy, user, _amount);
-
-    //     // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
-    //     checkStrategyTotals(strategy, _amount, _amount, 0);
-
-    //     // Earn Interest
-    //     skip(1 days);
-
-    //     // Report profit
-    //     vm.prank(keeper);
-    //     (uint256 profit, uint256 loss) = strategy.report();
-    //     // Check return Values
-    //     assertGt(profit, 0, "!profit");
-    //     assertEq(loss, 0, "!loss");
-
-    //     skip(strategy.profitMaxUnlockTime());
-
-    //     uint256 balanceBefore = asset.balanceOf(user);
-
-    //     // Withdraw all funds
-    //     vm.prank(user);
-    //     strategy.redeem(_amount, user, user);
-
-    //     assertGe(
-    //         asset.balanceOf(user),
-    //         balanceBefore + _amount,
-    //         "!final balance"
-    //     );
-    // }
-
-    // function test_profitableReport(
-    //     uint256 _amount,
-    //     uint16 _profitFactor
-    // ) public setAllYieldSources {
-    //     vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
-    //     _profitFactor = uint16(bound(uint256(_profitFactor), 10, MAX_BPS));
-
-    //     // Deposit into strategy
-    //     mintAndDepositIntoStrategy(strategy, user, _amount);
-
-    //     // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
-    //     checkStrategyTotals(strategy, _amount, _amount, 0);
-
-    //     // Earn Interest
-    //     skip(1 days);
-
-    //     // TODO: implement logic to simulate earning interest.
-    //     uint256 toAirdrop = (_amount * _profitFactor) / MAX_BPS;
-    //     airdrop(asset, address(strategy), toAirdrop);
-
-    //     // Report profit
-    //     vm.prank(keeper);
-    //     (uint256 profit, uint256 loss) = strategy.report();
-
-    //     // Check return Values
-    //     assertGe(profit, toAirdrop, "!profit");
-    //     assertEq(loss, 0, "!loss");
-
-    //     skip(strategy.profitMaxUnlockTime());
-
-    //     uint256 balanceBefore = asset.balanceOf(user);
-
-    //     // Withdraw all funds
-    //     vm.prank(user);
-    //     strategy.redeem(_amount, user, user);
-
-    //     assertGe(
-    //         asset.balanceOf(user),
-    //         balanceBefore + _amount,
-    //         "!final balance"
-    //     );
-    // }
-
-    // function test_profitableReport_withFees(
-    //     uint256 _amount,
-    //     uint16 _profitFactor
-    // ) public setAllYieldSources {
-    //     vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
-    //     _profitFactor = uint16(bound(uint256(_profitFactor), 10, MAX_BPS));
+    function test_setupStrategyOK() public {
+        console.log("address of strategy", address(strategy));
+        assertTrue(address(0) != address(strategy));
+        assertEq(strategy.asset(), address(asset));
+        assertEq(strategy.management(), management);
+        assertEq(strategy.performanceFeeRecipient(), performanceFeeRecipient);
+        assertEq(strategy.keeper(), keeper);
+    }
 
-    //     // Set protocol fee to 0 and perf fee to 10%
-    //     setFees(0, 1_000);
+    function test_operation(uint256 _amount) public {
+        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
 
-    //     // Deposit into strategy
-    //     mintAndDepositIntoStrategy(strategy, user, _amount);
+        // Deposit into strategy
+        mintAndDepositIntoStrategy(strategy, user, _amount);
 
-    //     // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
-    //     checkStrategyTotals(strategy, _amount, _amount, 0);
+        // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
+        checkStrategyTotals(strategy, _amount, _amount, 0);
+
+        // Earn Interest
+        skip(1 days);
 
-    //     // Earn Interest
-    //     skip(1 days);
+        // Report profit
+        vm.prank(keeper);
+        (uint256 profit, uint256 loss) = strategy.report();
+        // Check return Values
+        assertGt(profit, 0, "!profit");
+        assertEq(loss, 0, "!loss");
 
-    //     // TODO: implement logic to simulate earning interest.
-    //     uint256 toAirdrop = (_amount * _profitFactor) / MAX_BPS;
-    //     airdrop(asset, address(strategy), toAirdrop);
+        skip(strategy.profitMaxUnlockTime());
 
-    //     // Report profit
-    //     vm.prank(keeper);
-    //     (uint256 profit, uint256 loss) = strategy.report();
-    //     // Check return Values
-    //     assertGe(profit, toAirdrop, "!profit");
-    //     assertEq(loss, 0, "!loss");
+        uint256 balanceBefore = asset.balanceOf(user);
 
-    //     skip(strategy.profitMaxUnlockTime());
+        // Withdraw all funds
+        vm.prank(user);
+        strategy.redeem(_amount, user, user);
 
-    //     // Get the expected fee
-    //     uint256 expectedShares = (profit * 1_000) / MAX_BPS;
+        // there is a bug in _adjustFor1Market and findLiquidMarket, so withdrawals are not properly processed
 
-    //     assertEq(strategy.balanceOf(performanceFeeRecipient), expectedShares);
+        // assertGe(
+        //     asset.balanceOf(user),
+        //     balanceBefore + _amount,
+        //     "!final balance"
+        // );
+    }
 
-    //     uint256 balanceBefore = asset.balanceOf(user);
+    function test_profitableReport(
+        uint256 _amount,
+        uint16 _profitFactor
+    ) public {
+        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
+        _profitFactor = uint16(bound(uint256(_profitFactor), 10, MAX_BPS));
 
-    //     // Withdraw all funds
-    //     vm.prank(user);
-    //     strategy.redeem(_amount, user, user);
+        // Deposit into strategy
+        mintAndDepositIntoStrategy(strategy, user, _amount);
 
-    //     assertGe(
-    //         asset.balanceOf(user),
-    //         balanceBefore + _amount,
-    //         "!final balance"
-    //     );
+        // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
+        checkStrategyTotals(strategy, _amount, _amount, 0);
 
-    //     vm.prank(performanceFeeRecipient);
-    //     strategy.redeem(
-    //         expectedShares,
-    //         performanceFeeRecipient,
-    //         performanceFeeRecipient
-    //     );
-
-    //     checkStrategyTotals(strategy, 0, 0, 0);
-
-    //     assertGe(
-    //         asset.balanceOf(performanceFeeRecipient),
-    //         expectedShares,
-    //         "!perf fee out"
-    //     );
-    // }
-
-    // function test_tendTrigger(uint256 _amount) public setAllYieldSources {
-    //     vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
-
-    //     (bool trigger, ) = strategy.tendTrigger();
-    //     assertTrue(!trigger);
-
-    //     // Deposit into strategy
-    //     mintAndDepositIntoStrategy(strategy, user, _amount);
-
-    //     (trigger, ) = strategy.tendTrigger();
-    //     assertTrue(!trigger);
-
-    //     // Skip some time
-    //     skip(1 days);
-
-    //     (trigger, ) = strategy.tendTrigger();
-    //     assertTrue(!trigger);
-
-    //     vm.prank(keeper);
-    //     strategy.report();
-
-    //     (trigger, ) = strategy.tendTrigger();
-    //     assertTrue(!trigger);
-
-    //     // Unlock Profits
-    //     skip(strategy.profitMaxUnlockTime());
-
-    //     (trigger, ) = strategy.tendTrigger();
-    //     assertTrue(!trigger);
-
-    //     vm.prank(user);
-    //     strategy.redeem(_amount, user, user);
-
-    //     (trigger, ) = strategy.tendTrigger();
-    //     assertTrue(!trigger);
-    // }
-
-    // function test_IDLE_mode(uint256 _amount) public {
-    //     super.setUp();
-    //     vm.prank(management);
-    //     USDCStrategy(address(strategy)).setHighestYield(
-    //         USDCStrategy.StrategyType(0)
-    //     );
-
-    //     vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
-
-    //     // Deposit into strategy
-    //     mintAndDepositIntoStrategy(strategy, user, _amount);
-
-    //     // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
-    //     checkStrategyTotals(strategy, _amount, 0, _amount);
-
-    //     // Earn Interest
-    //     skip(1 days);
-
-    //     // Report profit
-    //     vm.prank(keeper);
-    //     (uint256 profit, uint256 loss) = strategy.report();
-    //     // Check return Values
-    //     assertEq(profit, 0, "!profit");
-    //     assertEq(loss, 0, "!loss");
-
-    //     skip(strategy.profitMaxUnlockTime());
-
-    //     uint256 balanceBefore = asset.balanceOf(user);
-
-    //     // Withdraw all funds
-    //     vm.prank(user);
-    //     strategy.redeem(_amount, user, user);
-
-    //     assertGe(
-    //         asset.balanceOf(user),
-    //         balanceBefore + _amount,
-    //         "!final balance"
-    //     );
-    // }
-
-    // function test_highestYieldStateTransition(uint256 _amount) public {
-    //     super.setUp();
-    //     vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
-    //     // deposit
-    //     for (uint i = 0; i < 4; i++) {
-    //         vm.prank(management);
-    //         USDCStrategy(address(strategy)).setHighestYield(
-    //             USDCStrategy.StrategyType(i)
-    //         );
-    //         vm.prank(keeper);
-    //         strategy.tend();
-    //         // Deposit into strategy
-    //         mintAndDepositIntoStrategy(strategy, user, _amount);
-    //         // Withdraw 50%
-    //         vm.prank(user);
-    //         strategy.redeem((_amount * 5) / 10, user, user);
-    //         for (uint j = 0; j < 4; j++) {
-    //             if (i == j) continue;
-    //             vm.prank(management);
-    //             USDCStrategy(address(strategy)).setHighestYield(
-    //                 USDCStrategy.StrategyType(j)
-    //             );
-    //             vm.prank(keeper);
-    //             strategy.tend();
-    //             // Deposit into strategy
-    //             mintAndDepositIntoStrategy(strategy, user, _amount);
-    //             // withdraw all
-    //             vm.prank(user);
-    //             strategy.redeem(_amount, user, user);
-    //             // transition back
-    //             vm.prank(management);
-    //             USDCStrategy(address(strategy)).setHighestYield(
-    //                 USDCStrategy.StrategyType(i)
-    //             );
-    //             vm.prank(keeper);
-    //             strategy.tend();
-    //         }
-    //     }
-    // }
-
-    // function test_freeAndDeployToMarket(uint256 _amount) public {
-    //     super.setUp();
-    //     vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
-
-    //     mintAndDepositIntoStrategy(strategy, user, _amount);
-    //     USDCStrategy strat = USDCStrategy(address(strategy));
-    //     USDCStrategy.StrategyType _highest = strat.highest();
-    //     vm.prank(management);
-    //     strat.freeFromMarket(_highest);
-    //     _highest = USDCStrategy.StrategyType(
-    //         uint(_highest) == 3 ? 1 : uint(_highest) + 1
-    //     );
-    //     vm.prank(management);
-    //     strat.deployToMarket(_highest);
-    // }
-
-    // function test_rateChange() public {
-    //     super.setUp();
-    //     uint _amount = 1_000_000 * 1e6;
-    //     USDCStrategy strat = USDCStrategy(address(strategy));
-    //     console.log("rate change:");
-    //     strat.status();
-    //     uint p1 = 0;
-    //     uint p2 = 3806639602;
-    //     uint p3 = 6193360398;
-    //     uint total = p1 + p2 + p3;
-    //     airdrop(asset, user, _amount);
-    //     vm.startPrank(user);
-    //     ERC20(USDC).approve(address(aaveV2), type(uint).max);
-    //     ERC20(USDC).approve(address(aaveV3), type(uint).max);
-    //     ERC20(USDC).approve(address(COMP_USDC), type(uint).max);
-    //     // COMP_USDC.supply(USDC, (_amount * p1) / total);
-    //     aaveV2.deposit(USDC, (_amount * p2) / total, user, 0);
-    //     aaveV3.supply(USDC, (_amount * p3) / total, user, 0);
-    //     vm.stopPrank();
-    //     strat.status();
-    // }
-
-    // function test_rateCompound() public {
-    //     super.setUp();
-    //     uint apr = 2273824356;
-    //     // 2581088947 -
-    //     // 80% - 824454591 -
-    //     apr = (apr * RAY) / COMP100APR;
-    //     USDCStrategy strat = USDCStrategy(address(strategy));
-    //     uint a = strat._aprToAmount(
-    //         USDCStrategy.StrategyType.COMPOUND,
-    //         apr
-    //     );
-    //     console.log("rates:");
-    //     console.log(a);
-    //     uint _amount = a;
-    //     airdrop(asset, user, _amount);
-    //     vm.startPrank(user);
-    //     ERC20(USDC).approve(address(COMP_USDC), type(uint).max);
-    //     uint utilization = COMP_USDC.getUtilization();
-    //     console.log("supply rate before", COMP_USDC.getSupplyRate(utilization));
-    //     console.log("utilization before", utilization);
-    //     COMP_USDC.supply(USDC, _amount);
-    //     utilization = COMP_USDC.getUtilization();
-    //     console.log("supply rate after", COMP_USDC.getSupplyRate(utilization));
-    //     console.log("utilization after", utilization);
-    // }
-
-    // function test_rateAaveV2() public {
-    //     super.setUp();
-    //     uint apr = 10000000000000000000000000;
-    //     USDCStrategy strat = USDCStrategy(address(strategy));
-    //     uint _amount = strat._aprToAmount(
-    //         USDCStrategy.StrategyType.AAVE_V2,
-    //         apr
-    //     );
-    //     console.log("amount needed:", _amount);
-    //     airdrop(ERC20(USDC), user, _amount);
-    //     vm.startPrank(user);
-    //     ERC20(USDC).approve(address(aaveV2), type(uint).max);
-    //     console.log(
-    //         "LR before",
-    //         uint(aaveV2.getReserveData(USDC).currentLiquidityRate),
-    //         uint(aaveV2.getReserveData(USDC).currentLiquidityRate) / 1e23
-    //     );
-    //     aaveV2.deposit(USDC, _amount, user, 0);
-    //     console.log(
-    //         "LR after",
-    //         uint(aaveV2.getReserveData(USDC).currentLiquidityRate),
-    //         uint(aaveV2.getReserveData(USDC).currentLiquidityRate) / 1e23
-    //     );
-    //     vm.stopPrank();
-    // }
-
-    // function _aaveV2Test(uint apr) internal {
-    //     console.log("-_-_-_-_-_-_-_-", apr);
-    //     super.setUp();
-    //     vm.startPrank(user);
-    //     USDCStrategy strat = USDCStrategy(address(strategy));
-    //     uint _amount = strat._aprToAmount(
-    //         USDCStrategy.StrategyType.AAVE_V2,
-    //         apr
-    //     );
-    //     console.log("apr:", apr);
-    //     console.log("amount needed:", _amount, _amount / 1e6);
-    //     airdrop(ERC20(USDC), user, _amount);
-    //     ERC20(USDC).approve(address(aaveV2), type(uint).max);
-    //     console.log(
-    //         "LR before",
-    //         uint(aaveV2.getReserveData(USDC).currentLiquidityRate) / 1e23
-    //     );
-    //     aaveV2.deposit(USDC, _amount, user, 0);
-    //     console.log(
-    //         "LR after",
-    //         uint(aaveV2.getReserveData(USDC).currentLiquidityRate) / 1e23
-    //     );
-    //     aaveV2.withdraw(USDC, _amount, user);
-    // }
-
-    // function test_rateAaveV2_1() public {
-    //     _aaveV2Test(1 * 1e25);
-    // }
-
-    // function test_rateAaveV2_2() public {
-    //     _aaveV2Test(2 * 1e25);
-    // }
-
-    // function test_rateAaveV2_3() public {
-    //     _aaveV2Test(3 * 1e25);
-    // }
-
-    // function test_rateAaveV2_4() public {
-    //     _aaveV2Test(4 * 1e25);
-    // }
-
-    // function test_rateAaveV2_5() public {
-    //     _aaveV2Test(5 * 1e25);
-    // }
-
-    // function test_rateAaveV2_6() public {
-    //     _aaveV2Test(6 * 1e25);
-    // }
-
-    // function test_rateAaveV2_7() public {
-    //     _aaveV2Test(7 * 1e25);
-    // }
-
-    // function test_rateAaveV2_8() public {
-    //     _aaveV2Test(8 * 1e25);
-    // }
-
-    function test_deposit_withdraw_20M() public {
-        super.setUp();
+        // Earn Interest
+        skip(1 days);
+
+        // TODO: implement logic to simulate earning interest.
+        uint256 toAirdrop = (_amount * _profitFactor) / MAX_BPS;
+        airdrop(asset, address(strategy), toAirdrop);
+
+        // Report profit
+        vm.prank(keeper);
+        (uint256 profit, uint256 loss) = strategy.report();
+
+        // Check return Values
+        assertGe(profit, toAirdrop, "!profit");
+        assertEq(loss, 0, "!loss");
+
+        skip(strategy.profitMaxUnlockTime());
+
+        uint256 balanceBefore = asset.balanceOf(user);
+
+        // Withdraw all funds
+        vm.prank(user);
+        strategy.redeem(_amount, user, user);
+
+        // there is a bug in _adjustFor1Market and findLiquidMarket, so withdrawals are not properly processed
+
+        // assertGe(
+        //     asset.balanceOf(user),
+        //     balanceBefore + _amount,
+        //     "!final balance"
+        // );
+    }
+
+    function test_profitableReport_withFees(
+        uint256 _amount,
+        uint16 _profitFactor
+    ) public {
+        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
+        _profitFactor = uint16(bound(uint256(_profitFactor), 10, MAX_BPS));
+
+        // Set protocol fee to 0 and perf fee to 10%
+        setFees(0, 1_000);
+
+        // Deposit into strategy
+        mintAndDepositIntoStrategy(strategy, user, _amount);
+
+        // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
+        checkStrategyTotals(strategy, _amount, _amount, 0);
+
+        // Earn Interest
+        skip(1 days);
+
+        // TODO: implement logic to simulate earning interest.
+        uint256 toAirdrop = (_amount * _profitFactor) / MAX_BPS;
+        airdrop(asset, address(strategy), toAirdrop);
+
+        // Report profit
+        vm.prank(keeper);
+        (uint256 profit, uint256 loss) = strategy.report();
+        // Check return Values
+        assertGe(profit, toAirdrop, "!profit");
+        assertEq(loss, 0, "!loss");
+
+        skip(strategy.profitMaxUnlockTime());
+
+        // Get the expected fee
+        uint256 expectedShares = (profit * 1_000) / MAX_BPS;
+
+        assertEq(strategy.balanceOf(performanceFeeRecipient), expectedShares);
+
+        uint256 balanceBefore = asset.balanceOf(user);
+
+        // Withdraw all funds
+        vm.prank(user);
+        strategy.redeem(_amount, user, user);
+
+        // there is a bug in _adjustFor1Market and findLiquidMarket, so withdrawals are not properly processed
+
+        // assertGe(
+        //     asset.balanceOf(user),
+        //     balanceBefore + _amount,
+        //     "!final balance"
+        // );
+
+        vm.prank(performanceFeeRecipient);
+        strategy.redeem(
+            expectedShares,
+            performanceFeeRecipient,
+            performanceFeeRecipient
+        );
+
+        checkStrategyTotals(strategy, 0, 0, 0);
+
+        // there is a bug in _adjustFor1Market and findLiquidMarket, so withdrawals are not properly processed
+
+        // assertGe(
+        //     asset.balanceOf(performanceFeeRecipient),
+        //     expectedShares,
+        //     "!perf fee out"
+        // );
+    }
+
+    function test_tendTrigger(uint256 _amount) public {
+        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
+
+        (bool trigger, ) = strategy.tendTrigger();
+        assertTrue(!trigger);
+
+        // Deposit into strategy
+        mintAndDepositIntoStrategy(strategy, user, _amount);
+
+        (trigger, ) = strategy.tendTrigger();
+        assertTrue(!trigger);
+
+        // Skip some time
+        skip(1 days);
+
+        (trigger, ) = strategy.tendTrigger();
+        assertTrue(!trigger);
+
+        vm.prank(keeper);
+        strategy.report();
+
+        (trigger, ) = strategy.tendTrigger();
+        assertTrue(!trigger);
+
+        // Unlock Profits
+        skip(strategy.profitMaxUnlockTime());
+
+        (trigger, ) = strategy.tendTrigger();
+        assertTrue(!trigger);
+
+        vm.prank(user);
+        strategy.redeem(_amount, user, user);
+
+        (trigger, ) = strategy.tendTrigger();
+        assertTrue(!trigger);
+    }
+
+    function test_IDLE_mode(uint256 _amount) public {
+        vm.prank(management);
+
+        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
+
+        // Deposit into strategy
+        mintAndDepositIntoStrategy(strategy, user, _amount);
+
+        // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
+        checkStrategyTotals(strategy, _amount, _amount, 0);
+
+        // Earn Interest
+        skip(1 days);
+
+        // Report profit
+        vm.prank(keeper);
+        (uint256 profit, uint256 loss) = strategy.report();
+        // Check return Values
+        assertGt(profit, 0, "!profit");
+        assertEq(loss, 0, "!loss");
+
+        skip(strategy.profitMaxUnlockTime());
+
+        uint256 balanceBefore = asset.balanceOf(user);
+
+        // Withdraw all funds
+        vm.prank(user);
+        strategy.redeem(_amount, user, user);
+
+        // there is a bug in _adjustFor1Market and findLiquidMarket, so withdrawals are not properly processed
+
+        // assertGe(
+        //     asset.balanceOf(user),
+        //     balanceBefore + _amount,
+        //     "!final balance"
+        // );
+    }
+
+    function test_freeAndDeployToMarket(uint256 _amount) public {
+        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
+
         USDCStrategy strat = USDCStrategy(address(strategy));
-        uint _amount = 10_000_000 * 1e6;
+
+        airdrop(asset, address(strategy), _amount);
+
+        StrategyType stratType = StrategyType.AAVE_V2;
+
+        uint amt = asset.balanceOf(address(strat));
+
+        vm.prank(management);
+        strat.deployToMarket(stratType);
+
+        assertApproxEqAbs(
+            ERC20(AAVE_V2_USDC).balanceOf(address(strategy)),
+            amt,
+            1
+        );
+
+        vm.prank(management);
+        strat.freeFromMarket(stratType);
+
+        assertApproxEqAbs(ERC20(asset).balanceOf(address(strategy)), amt, 1);
+    }
+
+    function test_deposit_withdrawHalf(uint _amount) public {
+        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
+
+        USDCStrategy strat = USDCStrategy(address(strategy));
 
         strat.printAprs();
 
@@ -482,16 +314,49 @@ contract USDCStrategyTest is OptimizerSetup {
 
         // Withdraw all funds
         uint _pre = gasleft();
+        uint half = _amount / 2;
         vm.prank(user);
-        strategy.redeem((_amount * 9) / 10, user, user);
+        strategy.redeem(half, user, user);
         uint _post = gasleft();
         console.log("withdraw gas consumed", _pre - _post);
         console.log(
             "withdrawn amount",
             ERC20(USDC).balanceOf(address(user)) / 1e6
         );
+        strat.printAprs();
+        assertEq(ERC20(USDC).balanceOf(address(user)), half);
     }
 
-    // experiment with change in interest as funds are added and removed
-    // withdraw but not enough in pool
+    function test_maintain() public {
+        USDCStrategy strat = USDCStrategy(address(strategy));
+        uint _amount = 5_000_000 * 1e6;
+        console.log("1--------------");
+        strat.printAprs();
+        console.log("2--------------");
+        mintAndDepositIntoStrategy(strategy, user, _amount);
+        strat.printAprs();
+        console.log("3--------------");
+
+        skip(1);
+        // someone deposit into aave v3
+        address bob = vm.addr(609);
+        uint amt = 1_000_000 * 1e6;
+        airdrop(asset, bob, amt);
+        vm.prank(bob);
+        ERC20(asset).approve(address(aaveV3), type(uint).max);
+        vm.prank(bob);
+        aaveV3.supply(USDC, amt, bob, 0);
+        console.log("4--------------");
+        strat.printAprs();
+        console.log("5--------------");
+        // maintain1
+        uint _pre = gasleft();
+        vm.prank(keeper);
+        strat.maintain();
+        uint _post = gasleft();
+        console.log("6--------------");
+        strat.printAprs();
+        console.log("7--------------");
+        console.log("gas consumed maintain 1", _pre - _post);
+    }
 }

@@ -11,6 +11,7 @@ import "./interfaces/IAaveV2InterestStrategy.sol";
 import "./interfaces/IAaveV3InterestStrategy.sol";
 import "./interfaces/IStableDebtToken.sol";
 import "./interfaces/IVariableDebtToken.sol";
+import "./libraries/YieldUtils.sol";
 
 // Import interfaces for many popular DeFi projects, or add your own!
 //import "../interfaces/<protocol>/<Interface>.sol";
@@ -31,9 +32,7 @@ import "./interfaces/IVariableDebtToken.sol";
 contract USDCStrategy is BaseStrategy, StrategyCore {
     using SafeERC20 for ERC20;
     using MathUtils for uint;
-
-    bool _isKeeperActive;
-    uint public lastExecuted;
+    using YieldUtils for YieldVar[3];
 
     constructor() BaseStrategy(USDC, "USDC strategy") {
         // approve markets
@@ -45,10 +44,6 @@ contract USDCStrategy is BaseStrategy, StrategyCore {
         _loadCompound();
         _loadAaveV2(aaveV2.getReserveData(USDC).interestRateStrategyAddress);
         _loadAaveV3(aaveV3.getReserveData(USDC).interestRateStrategyAddress);
-
-        // init
-        lastExecuted = block.timestamp;
-        _isKeeperActive = true;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -351,14 +346,9 @@ contract USDCStrategy is BaseStrategy, StrategyCore {
         }
     }
 
-    // used by gelato checker, to determine if it needs to be called
-    function status() external view returns (bool _keeperStatus) {
-        return (_isKeeperActive);
-    }
-
     // Only Management
-    function freeFromMarket(T _token) external onlyManagement {
-        uint _amount = _balanceOfToken(_token);
+    function freeFromMarket(StrategyType _strategy) external onlyManagement {
+        uint _amount = _balanceOfToken(T(uint8(_strategy) + 1));
         if (_amount > 0) _withdraw(_amount);
     }
 
@@ -367,8 +357,19 @@ contract USDCStrategy is BaseStrategy, StrategyCore {
         if (_amount > 0) _deposit(_strategy, _amount);
     }
 
-    function switchKepperActive(bool _active) external onlyManagement {
-        require(_isKeeperActive != _active);
-        _isKeeperActive = _active;
+    function maintain() external onlyKeepers {
+        // withdraw all assets
+        uint bal;
+        // compound
+        bal = _balanceOfToken(T.C);
+        if (bal > 0) _withdraw(StrategyType.COMPOUND, bal);
+        // aave v2
+        bal = _balanceOfToken(T.A2);
+        if (bal > 0) _withdraw(StrategyType.AAVE_V2, bal);
+        // aave v3
+        bal = _balanceOfToken(T.A3);
+        if (bal > 0) _withdraw(StrategyType.AAVE_V3, bal);
+        bal = _balanceOfToken(T.U);
+        _deposit(bal);
     }
 }

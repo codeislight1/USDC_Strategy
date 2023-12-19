@@ -10,12 +10,12 @@ library YieldUtils {
         if (y[1].apr < y[2].apr) (y[1], y[2]) = (y[2], y[1]);
         if (y[0].apr < y[1].apr) (y[0], y[1]) = (y[1], y[0]);
         if (y[1].apr < y[2].apr) (y[1], y[2]) = (y[2], y[1]);
-        console.log(
-            "## yields types ##",
-            uint(y[0].stratType),
-            uint(y[1].stratType),
-            uint(y[2].stratType)
-        );
+        // console.log(
+        //     "## yields types ##",
+        //     uint(y[0].stratType),
+        //     uint(y[1].stratType),
+        //     uint(y[2].stratType)
+        // );
         console.log(
             "## yields ordered ##",
             y[0].apr / 1e23,
@@ -27,15 +27,8 @@ library YieldUtils {
     function findLiquidMarket(
         YieldVar[3] memory y,
         uint _amount
-    ) internal view returns (YieldVar memory _y) {
+    ) internal pure returns (YieldVar memory _y) {
         for (uint i; i < 3; i++) {
-            console.log(
-                "mark",
-                uint(y[i].limit) / 1e6,
-                _amount / 1e6,
-                uint(y[i].amt) / 1e6
-            );
-            console.log("mark", uint(y[i].stratType));
             if (y[i].limit >= _amount + y[i].amt) {
                 _y = y[i];
                 break;
@@ -93,7 +86,7 @@ library YieldUtils {
     function deployAmount(
         YieldVar memory _y,
         uint _amount
-    ) internal pure returns (uint _deployedAmount, bool _isHitLimit) {
+    ) internal view returns (uint _deployedAmount, bool _isHitLimit) {
         uint _total = _amount + _y.amt;
         if (_y.limit >= _total) {
             _y.amt += _amount;
@@ -105,5 +98,19 @@ library YieldUtils {
             _isHitLimit = true;
         }
         return (_amount, _isHitLimit);
+    }
+
+    function getMarkets(
+        YieldVar[3] memory y
+    )
+        internal
+        pure
+        returns (YieldVar memory c, YieldVar memory v2, YieldVar memory v3)
+    {
+        for (uint i; i < 3; i++) {
+            if (y[i].stratType == StrategyType.COMPOUND) c = y[i];
+            else if (y[i].stratType == StrategyType.AAVE_V2) v2 = y[i];
+            else if (y[i].stratType == StrategyType.AAVE_V3) v3 = y[i];
+        }
     }
 }
