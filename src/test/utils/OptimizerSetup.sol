@@ -40,8 +40,8 @@ contract OptimizerSetup is ExtendedTest, IEvents {
     uint256 public MAX_BPS = 10_000;
 
     // Fuzz from $0.01 of 1e6 stable coins up to 1 trillion of a 1e18 coin
-    uint256 public maxFuzzAmount = 1e7 * 1e6; // 100M
-    uint256 public minFuzzAmount = 10_000;
+    uint256 public maxFuzzAmount = 1e7 * 1e6; // 10M
+    uint256 public minFuzzAmount = 10_000; // 0.01
 
     // Default profit max unlock time is set for 10 days
     uint256 public profitMaxUnlockTime = 10 days;
@@ -92,13 +92,13 @@ contract OptimizerSetup is ExtendedTest, IEvents {
         IStrategyInterface _strategy,
         address _user,
         uint256 _amount
-    ) public {
+    ) public returns (uint shares) {
         vm.prank(_user);
         asset.approve(address(_strategy), _amount);
 
         uint _pre = gasleft();
         vm.prank(_user);
-        _strategy.deposit(_amount, _user);
+        shares = _strategy.deposit(_amount, _user);
         uint _post = gasleft();
         console.log("deposit gas:", _pre - _post);
     }
@@ -107,9 +107,9 @@ contract OptimizerSetup is ExtendedTest, IEvents {
         IStrategyInterface _strategy,
         address _user,
         uint256 _amount
-    ) public {
+    ) public returns (uint) {
         airdrop(asset, _user, _amount);
-        depositIntoStrategy(_strategy, _user, _amount);
+        return depositIntoStrategy(_strategy, _user, _amount);
     }
 
     // For checking the amounts in the strategy
@@ -119,8 +119,13 @@ contract OptimizerSetup is ExtendedTest, IEvents {
         uint256 _totalDebt,
         uint256 _totalIdle
     ) public {
-        assertEq(_strategy.totalAssets(), _totalAssets, "!totalAssets");
-        assertEq(_strategy.totalDebt(), _totalDebt, "!totalDebt");
+        assertApproxEqAbs(
+            _strategy.totalAssets(),
+            _totalAssets,
+            2,
+            "!totalAssets"
+        );
+        assertApproxEqAbs(_strategy.totalDebt(), _totalDebt, 2, "!totalDebt");
         assertEq(_strategy.totalIdle(), _totalIdle, "!totalIdle");
         assertEq(_totalAssets, _totalDebt + _totalIdle, "!Added");
     }

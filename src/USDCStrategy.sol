@@ -195,12 +195,17 @@ contract USDCStrategy is BaseStrategy, StrategyCore {
         // C active ? third max : 0
         // V2 active ? third max : 0
         // V3 active ? limit - supply : 0
+
         uint thirdMax = type(uint).max / 3; // uint.max / number of markets
-        uint v3_tS = ERC20(AAVE_V3_USDC).totalSupply();
-        uint v3_cap = _getV3SupplyCap();
-        uint v3Limit = v3_cap == 0
-            ? thirdMax
-            : (v3_cap > v3_tS ? v3_cap - v3_tS : 0);
+        // option 1
+        // uint v3_tS = ERC20(AAVE_V3_USDC).totalSupply(); // TODO totalSupply() subsequently calls getReserveNormalizedIncome(asset) and causes Arithmetic over/underflow
+        // uint v3_cap = _getV3SupplyCap();
+        // uint v3Limit = v3_cap == 0
+        //     ? thirdMax
+        //     : (v3_cap > v3_tS ? v3_cap - v3_tS : 0);
+
+        // option 2
+        uint v3Limit = thirdMax;
         return
             (_isActive(StrategyType.COMPOUND) ? thirdMax : 0) +
             (_isActive(StrategyType.AAVE_V2) ? thirdMax : 0) +
@@ -296,7 +301,7 @@ contract USDCStrategy is BaseStrategy, StrategyCore {
                 console.log(
                     "allocate type amt:",
                     uint(y[i].stratType),
-                    _amt / 1e6
+                    _amt > 1e6 ? _amt / 1e6 : _amt
                 );
                 _deposit(y[i].stratType, _amt);
             }
@@ -319,7 +324,7 @@ contract USDCStrategy is BaseStrategy, StrategyCore {
                 console.log(
                     "disallocate type amt:",
                     uint(y[i].stratType),
-                    _amt / 1e6
+                    _amt > 1e6 ? _amt / 1e6 : _amt
                 );
                 _withdraw(y[i].stratType, _amt);
             }

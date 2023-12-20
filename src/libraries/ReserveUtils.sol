@@ -54,7 +54,8 @@ library ReserveUtils {
     ) internal view returns (uint _amt, bool _isLimit) {
         uint _deployedAmount;
         (_deployedAmount, _isLimit) = YieldUtils.deployAmount(
-            _from,
+            _y,
+            _from.stratType,
             _a >= _amount ? _amount : _a
         );
         _amount -= _deployedAmount;

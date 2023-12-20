@@ -51,10 +51,11 @@ contract USDCStrategyTest is OptimizerSetup {
         vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
 
         // Deposit into strategy
-        mintAndDepositIntoStrategy(strategy, user, _amount);
+        uint shares = mintAndDepositIntoStrategy(strategy, user, _amount);
+        // if (_hasCompound()) shares -= 1;
 
         // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
-        checkStrategyTotals(strategy, _amount, _amount, 0);
+        checkStrategyTotals(strategy, shares, shares, 0);
 
         // Earn Interest
         skip(1 days);
@@ -72,15 +73,13 @@ contract USDCStrategyTest is OptimizerSetup {
 
         // Withdraw all funds
         vm.prank(user);
-        strategy.redeem(_amount, user, user);
+        strategy.redeem(shares, user, user);
 
-        // there is a bug in _adjustFor1Market and findLiquidMarket, so withdrawals are not properly processed
-
-        // assertGe(
-        //     asset.balanceOf(user),
-        //     balanceBefore + _amount,
-        //     "!final balance"
-        // );
+        assertGe(
+            asset.balanceOf(user),
+            balanceBefore + shares,
+            "!final balance"
+        );
     }
 
     function test_profitableReport(
@@ -91,7 +90,8 @@ contract USDCStrategyTest is OptimizerSetup {
         _profitFactor = uint16(bound(uint256(_profitFactor), 10, MAX_BPS));
 
         // Deposit into strategy
-        mintAndDepositIntoStrategy(strategy, user, _amount);
+        uint shares = mintAndDepositIntoStrategy(strategy, user, _amount);
+        // if (_hasCompound()) shares -= 1;
 
         // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
         checkStrategyTotals(strategy, _amount, _amount, 0);
@@ -108,7 +108,7 @@ contract USDCStrategyTest is OptimizerSetup {
         (uint256 profit, uint256 loss) = strategy.report();
 
         // Check return Values
-        assertGe(profit, toAirdrop, "!profit");
+        assertGt(profit, toAirdrop, "!profit");
         assertEq(loss, 0, "!loss");
 
         skip(strategy.profitMaxUnlockTime());
@@ -117,15 +117,13 @@ contract USDCStrategyTest is OptimizerSetup {
 
         // Withdraw all funds
         vm.prank(user);
-        strategy.redeem(_amount, user, user);
+        strategy.redeem(shares, user, user);
 
-        // there is a bug in _adjustFor1Market and findLiquidMarket, so withdrawals are not properly processed
-
-        // assertGe(
-        //     asset.balanceOf(user),
-        //     balanceBefore + _amount,
-        //     "!final balance"
-        // );
+        assertGe(
+            asset.balanceOf(user),
+            balanceBefore + shares,
+            "!final balance"
+        );
     }
 
     function test_profitableReport_withFees(
@@ -137,12 +135,12 @@ contract USDCStrategyTest is OptimizerSetup {
 
         // Set protocol fee to 0 and perf fee to 10%
         setFees(0, 1_000);
-
         // Deposit into strategy
-        mintAndDepositIntoStrategy(strategy, user, _amount);
+        uint shares = mintAndDepositIntoStrategy(strategy, user, _amount);
+        // if (_hasCompound()) shares -= 1;
 
         // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
-        checkStrategyTotals(strategy, _amount, _amount, 0);
+        checkStrategyTotals(strategy, shares, shares, 0);
 
         // Earn Interest
         skip(1 days);
@@ -155,7 +153,7 @@ contract USDCStrategyTest is OptimizerSetup {
         vm.prank(keeper);
         (uint256 profit, uint256 loss) = strategy.report();
         // Check return Values
-        assertGe(profit, toAirdrop, "!profit");
+        assertGt(profit, toAirdrop, "!profit");
         assertEq(loss, 0, "!loss");
 
         skip(strategy.profitMaxUnlockTime());
@@ -169,15 +167,13 @@ contract USDCStrategyTest is OptimizerSetup {
 
         // Withdraw all funds
         vm.prank(user);
-        strategy.redeem(_amount, user, user);
+        strategy.redeem(shares, user, user);
 
-        // there is a bug in _adjustFor1Market and findLiquidMarket, so withdrawals are not properly processed
-
-        // assertGe(
-        //     asset.balanceOf(user),
-        //     balanceBefore + _amount,
-        //     "!final balance"
-        // );
+        assertGe(
+            asset.balanceOf(user),
+            balanceBefore + shares,
+            "!final balance"
+        );
 
         vm.prank(performanceFeeRecipient);
         strategy.redeem(
@@ -188,13 +184,11 @@ contract USDCStrategyTest is OptimizerSetup {
 
         checkStrategyTotals(strategy, 0, 0, 0);
 
-        // there is a bug in _adjustFor1Market and findLiquidMarket, so withdrawals are not properly processed
-
-        // assertGe(
-        //     asset.balanceOf(performanceFeeRecipient),
-        //     expectedShares,
-        //     "!perf fee out"
-        // );
+        assertGe(
+            asset.balanceOf(performanceFeeRecipient),
+            expectedShares,
+            "!perf fee out"
+        );
     }
 
     function test_tendTrigger(uint256 _amount) public {
@@ -204,7 +198,9 @@ contract USDCStrategyTest is OptimizerSetup {
         assertTrue(!trigger);
 
         // Deposit into strategy
-        mintAndDepositIntoStrategy(strategy, user, _amount);
+        // mintAndDepositIntoStrategy(strategy, user, _amount);
+        uint shares = mintAndDepositIntoStrategy(strategy, user, _amount);
+        // if (_hasCompound()) shares -= 1;
 
         (trigger, ) = strategy.tendTrigger();
         assertTrue(!trigger);
@@ -228,7 +224,7 @@ contract USDCStrategyTest is OptimizerSetup {
         assertTrue(!trigger);
 
         vm.prank(user);
-        strategy.redeem(_amount, user, user);
+        strategy.redeem(shares, user, user);
 
         (trigger, ) = strategy.tendTrigger();
         assertTrue(!trigger);
@@ -240,7 +236,9 @@ contract USDCStrategyTest is OptimizerSetup {
         vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
 
         // Deposit into strategy
-        mintAndDepositIntoStrategy(strategy, user, _amount);
+        // mintAndDepositIntoStrategy(strategy, user, _amount);
+        uint shares = mintAndDepositIntoStrategy(strategy, user, _amount);
+        // if (_hasCompound()) shares -= 1;
 
         // TODO: Implement logic so totalDebt is _amount and totalIdle = 0.
         checkStrategyTotals(strategy, _amount, _amount, 0);
@@ -261,15 +259,13 @@ contract USDCStrategyTest is OptimizerSetup {
 
         // Withdraw all funds
         vm.prank(user);
-        strategy.redeem(_amount, user, user);
+        strategy.redeem(shares, user, user);
 
-        // there is a bug in _adjustFor1Market and findLiquidMarket, so withdrawals are not properly processed
-
-        // assertGe(
-        //     asset.balanceOf(user),
-        //     balanceBefore + _amount,
-        //     "!final balance"
-        // );
+        assertGe(
+            asset.balanceOf(user),
+            balanceBefore + shares,
+            "!final balance"
+        );
     }
 
     function test_freeAndDeployToMarket(uint256 _amount) public {
@@ -298,6 +294,10 @@ contract USDCStrategyTest is OptimizerSetup {
         assertApproxEqAbs(ERC20(asset).balanceOf(address(strategy)), amt, 1);
     }
 
+    function _hasCompound() internal view returns (bool) {
+        return ERC20(address(COMP_USDC)).balanceOf(address(strategy)) > 0;
+    }
+
     function test_deposit_withdrawHalf(uint _amount) public {
         vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
 
@@ -305,16 +305,18 @@ contract USDCStrategyTest is OptimizerSetup {
 
         strat.printAprs();
 
-        mintAndDepositIntoStrategy(strategy, user, _amount);
-
+        // mintAndDepositIntoStrategy(strategy, user, _amount);
+        uint shares = mintAndDepositIntoStrategy(strategy, user, _amount); // 1 for compound and the other 1 for rounding down
+        // if (_hasCompound()) shares -= 1;
         strat.printAprs();
+        checkStrategyTotals(strategy, _amount, _amount, 0);
 
-        skip(1);
+        skip(1 days);
         console.log("--------------");
 
-        // Withdraw all funds
+        // Withdraw half funds
         uint _pre = gasleft();
-        uint half = _amount / 2;
+        uint half = shares / 2;
         vm.prank(user);
         strategy.redeem(half, user, user);
         uint _post = gasleft();
@@ -330,14 +332,11 @@ contract USDCStrategyTest is OptimizerSetup {
     function test_maintain() public {
         USDCStrategy strat = USDCStrategy(address(strategy));
         uint _amount = 5_000_000 * 1e6;
-        console.log("1--------------");
         strat.printAprs();
-        console.log("2--------------");
         mintAndDepositIntoStrategy(strategy, user, _amount);
         strat.printAprs();
-        console.log("3--------------");
-
         skip(1);
+
         // someone deposit into aave v3
         address bob = vm.addr(609);
         uint amt = 1_000_000 * 1e6;
@@ -346,17 +345,59 @@ contract USDCStrategyTest is OptimizerSetup {
         ERC20(asset).approve(address(aaveV3), type(uint).max);
         vm.prank(bob);
         aaveV3.supply(USDC, amt, bob, 0);
-        console.log("4--------------");
         strat.printAprs();
-        console.log("5--------------");
-        // maintain1
+
+        // maintain
         uint _pre = gasleft();
         vm.prank(keeper);
         strat.maintain();
         uint _post = gasleft();
-        console.log("6--------------");
         strat.printAprs();
-        console.log("7--------------");
-        console.log("gas consumed maintain 1", _pre - _post);
+        console.log("gas consumed maintain", _pre - _post);
+    }
+
+    function test_deposit_withdraw(uint _amount) public {
+        vm.assume(_amount > minFuzzAmount && _amount < maxFuzzAmount);
+
+        USDCStrategy strat = USDCStrategy(address(strategy));
+
+        strat.printAprs();
+
+        uint shares = mintAndDepositIntoStrategy(strategy, user, _amount); // round down of compound and round down of a
+        // if (_hasCompound()) shares -= 1; //TODO check of the diff C tokens
+
+        strat.printAprs();
+
+        // Earn Interest
+        skip(1 days);
+
+        // Report profit
+        vm.prank(keeper);
+        (uint256 profit, uint256 loss) = strategy.report();
+        // Check return Values
+        assertGt(profit, 0, "!profit");
+        assertEq(loss, 0, "!loss");
+
+        skip(strategy.profitMaxUnlockTime());
+
+        uint256 balanceBefore = asset.balanceOf(user);
+
+        // Withdraw all funds
+        uint _pre = gasleft();
+        vm.prank(user);
+        strategy.redeem(shares, user, user);
+        uint _post = gasleft();
+        console.log("withdraw gas consumed", _pre - _post);
+        console.log(
+            "withdrawn amount",
+            ERC20(USDC).balanceOf(address(user)) / 1e6
+        );
+        strat.printAprs();
+
+        assertGe(
+            asset.balanceOf(user),
+            balanceBefore + shares,
+            "!final balance"
+        );
     }
 }

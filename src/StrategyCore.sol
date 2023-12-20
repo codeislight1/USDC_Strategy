@@ -162,10 +162,14 @@ contract StrategyCore {
     }
 
     // funds adjustment
-    function _adjustFor1Market(YieldVar memory y, uint _amount) internal view {
+    function _adjustFor1Market(
+        YieldVar[3] memory _y,
+        StrategyType _strat,
+        uint _amount
+    ) internal view returns (uint amt) {
         // console.log("## ALLOCATE 1", _amount / 1e6, uint(y.stratType));
-        console.log("adjust 1", _amount / 1e6);
-        y.deployAmount(_amount);
+        // console.log("adjust 1", _amount / 1e6);
+        (amt, ) = _y.deployAmount(_strat, _amount);
     }
 
     function _adjustFundsFor2Markets(
@@ -175,7 +179,7 @@ contract StrategyCore {
         bool _isDeposit
     ) internal view returns (uint _amount) {
         //
-        console.log("adjust 2", _amt / 1e6);
+        // console.log("adjust 2", _amt / 1e6);
         _amount = _amt;
         bool _isBreak;
         while (_amount != 0 && !_isBreak) {
@@ -228,8 +232,8 @@ contract StrategyCore {
         bool _isDeposit
     ) internal view returns (uint _amount) {
         //
-        console.log("adjust 3", _amount / 1e6);
         _amount = _amt;
+        // console.log("adjust 3", _amount / 1e6);
         bool _isBreak = false;
         while (_amount != 0 && !_isBreak) {
             if (_amount <= MINIMUM) {
@@ -248,6 +252,7 @@ contract StrategyCore {
                 (y[_isDeposit ? 2 : 1].apr.eq(y[_isDeposit ? 1 : 0].apr) &&
                     y[_isDeposit ? 1 : 2].apr.lt(y[_isDeposit ? 0 : 1].apr))
             ) {
+                // console.log("3CHECK 1", _amount);
                 // deposit  : i2 < i1 < i0 || i2 = i1 < i0
                 // withdraw : i2 < i1 < i0 || i2 < i1 = i0
                 // console.log("ALLOC3 CHECK 1", _amount / 1e6);
@@ -275,6 +280,7 @@ contract StrategyCore {
                 }
 
                 if (_a0 + _a1 <= _amount) {
+                    // console.log("3CHECK 2_1", _amount);
                     // console.log("ALLOC3 CHECK 2_1", _amount / 1e6);
                     YieldVar memory chosen = _isDeposit
                         ? y[0].getSlowest(y[1])
@@ -297,6 +303,7 @@ contract StrategyCore {
                         _isDeposit
                     );
                 } else if (_a0 <= _amount || _a1 <= _amount) {
+                    // console.log("3CHECK 2_2", _amount);
                     // console.log("ALLOC3 CHECK 2_2", _amount / 1e6);
                     YieldVar memory chosen = _isDeposit
                         ? y[0].getSlowest(y[1])
@@ -314,6 +321,7 @@ contract StrategyCore {
                         _isDeposit
                     );
                 } else {
+                    // console.log("3CHECK 2_3", _amount);
                     // console.log("ALLOC3 CHECK 2_3", _amount / 1e6);
                     uint _l = _a0 < _a1 ? _a0 : _a1;
                     uint _third = _amount.min(_l) / 2;
@@ -331,6 +339,7 @@ contract StrategyCore {
                     );
                 }
             } else {
+                // console.log("33CHECK 3", _amount);
                 //
                 // console.log("ALLOC3 CHECK 3", _amount / 1e6);
                 YieldVar memory chosen = _isDeposit
@@ -414,22 +423,35 @@ contract StrategyCore {
         ReservesVars memory r,
         YieldVar[3] memory y
     ) internal view {
+        // console.log("#### TOTAL MAREKTS - amount", totalMarkets, _amount / 1e6);
         if (totalMarkets == 3) {
             _amount = _adjustFundsFor3Markets(y, r, _amount, isDeposit); // might reach cap
 
             if (_amount > 0)
                 _amount = _adjustFundsFor2Markets(y, r, _amount, isDeposit);
-
             if (_amount > 0) {
-                _adjustFor1Market(y.findLiquidMarket(_amount), _amount);
+                _amount = _adjustFor1Market(
+                    y,
+                    y.findLiquidMarket(_amount).stratType,
+                    _amount
+                );
             }
         } else if (totalMarkets == 2) {
             _amount = _adjustFundsFor2Markets(y, r, _amount, isDeposit); // might reach cap
+
             if (_amount > 0) {
-                _adjustFor1Market(y.findLiquidMarket(_amount), _amount);
+                _amount = _adjustFor1Market(
+                    y,
+                    y.findLiquidMarket(_amount).stratType,
+                    _amount
+                );
             }
         } else if (totalMarkets == 1) {
-            _adjustFor1Market(y.findLiquidMarket(_amount), _amount);
+            _adjustFor1Market(
+                y,
+                y.findLiquidMarket(_amount).stratType,
+                _amount
+            );
         } else {
             revert("No Markets Available");
         }
@@ -438,26 +460,42 @@ contract StrategyCore {
     //
     function _loadDataSimulation(
         bool isDeposit
-    ) internal returns (uint i, ReservesVars memory r, YieldVar[3] memory y) {
+    )
+        internal
+        returns (uint markets, ReservesVars memory r, YieldVar[3] memory y)
+    {
         //
+        uint i;
+        // console.log("LOADED:", isDeposit);
         if (_isActive(StrategyType.COMPOUND)) {
             r.c = _getCompoundVars();
             y[i].stratType = StrategyType.COMPOUND;
-            y[i].apr = _getSupplyRate(y[i].stratType);
             y[i].limit = isDeposit
                 ? type(uint).max
                 : (
                     _balanceOfToken(T.U, address(COMP_USDC)).min(
                         _balanceOfToken(T.C)
                     )
-                ); // no limit
+                );
+
+            // y[i].apr = y[i].limit == 0 ? 0 : _getSupplyRate(y[i].stratType);
+
+            y[i].apr = isDeposit || y[i].limit != 0
+                ? _getSupplyRate(y[i].stratType)
+                : 0;
+            console.log(
+                "LOADED C:",
+                uint(y[i].stratType),
+                y[i].apr / 1e23,
+                y[i].limit / 1e6
+            );
+            if (y[i].apr != 0) markets++;
             i++;
         }
 
         if (_isActive(StrategyType.AAVE_V2)) {
             r.v2 = _getAaveV2Vars();
             y[i].stratType = StrategyType.AAVE_V2;
-            y[i].apr = _getSupplyRate(y[i].stratType);
             y[i].limit = isDeposit
                 ? type(uint).max
                 : (
@@ -465,13 +503,24 @@ contract StrategyCore {
                         _balanceOfToken(T.A2)
                     )
                 );
+            // y[i].apr = y[i].limit == 0 ? 0 : _getSupplyRate(y[i].stratType);
+            y[i].apr = isDeposit || y[i].limit != 0
+                ? _getSupplyRate(y[i].stratType)
+                : 0;
+            // console.log(
+            //     "LOADED V2:",
+            //     uint(y[i].stratType),
+            //     y[i].apr / 1e23,
+            //     y[i].limit / 1e6
+            // );
+            if (y[i].apr != 0) markets++;
+
             i++;
         }
 
         if (_isActive(StrategyType.AAVE_V3)) {
             r.v3 = _getAaveV3Vars();
             y[i].stratType = StrategyType.AAVE_V3;
-            y[i].apr = _getSupplyRate(y[i].stratType);
             uint supplyCap = _getV3SupplyCap();
             uint tS = ERC20(AAVE_V3_USDC).totalSupply();
             y[i].limit = isDeposit
@@ -485,7 +534,19 @@ contract StrategyCore {
                         _balanceOfToken(T.A3)
                     )
                 );
+            // y[i].apr = y[i].limit == 0 ? 0 : _getSupplyRate(y[i].stratType);
+            y[i].apr = isDeposit || y[i].limit != 0
+                ? _getSupplyRate(y[i].stratType)
+                : 0;
+            // console.log(
+            //     "LOADED V3:",
+            //     uint(y[i].stratType),
+            //     y[i].apr / 1e23,
+            //     y[i].limit / 1e6
+            // );
+            if (y[i].apr != 0) markets++;
         }
+
         y.orderYields();
     }
 

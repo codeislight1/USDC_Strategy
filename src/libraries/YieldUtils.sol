@@ -10,12 +10,12 @@ library YieldUtils {
         if (y[1].apr < y[2].apr) (y[1], y[2]) = (y[2], y[1]);
         if (y[0].apr < y[1].apr) (y[0], y[1]) = (y[1], y[0]);
         if (y[1].apr < y[2].apr) (y[1], y[2]) = (y[2], y[1]);
-        // console.log(
-        //     "## yields types ##",
-        //     uint(y[0].stratType),
-        //     uint(y[1].stratType),
-        //     uint(y[2].stratType)
-        // );
+        console.log(
+            "## yields types ##",
+            uint(y[0].stratType),
+            uint(y[1].stratType),
+            uint(y[2].stratType)
+        );
         console.log(
             "## yields ordered ##",
             y[0].apr / 1e23,
@@ -27,9 +27,14 @@ library YieldUtils {
     function findLiquidMarket(
         YieldVar[3] memory y,
         uint _amount
-    ) internal pure returns (YieldVar memory _y) {
+    ) internal view returns (YieldVar memory _y) {
+        // console.log("findLiquid amount", _amount);
+        // console.log("dump 0", uint(y[0].stratType), y[0].amt, y[0].apr);
+        // console.log("dump 1", uint(y[1].stratType), y[1].amt, y[1].apr);
+        // console.log("dump 2", uint(y[2].stratType), y[2].amt, y[2].apr);
         for (uint i; i < 3; i++) {
-            if (y[i].limit >= _amount + y[i].amt) {
+            // console.log("---findLiquid", y[i].limit, y[i].amt, y[i].apr / 1e23);
+            if (y[i].limit >= _amount + y[i].amt && y[i].apr != 0) {
                 _y = y[i];
                 break;
             }
@@ -40,14 +45,14 @@ library YieldUtils {
     function getSlowest(
         YieldVar memory a,
         YieldVar memory b
-    ) internal pure returns (YieldVar memory slowest) {
+    ) internal pure returns (YieldVar memory) {
         if (
             a.stratType == StrategyType.COMPOUND ||
             b.stratType == StrategyType.COMPOUND
         ) {
-            slowest = a.stratType == StrategyType.COMPOUND ? a : b;
+            return a.stratType == StrategyType.COMPOUND ? a : b;
         } else {
-            slowest = a.stratType == StrategyType.AAVE_V2 ? a : b;
+            return a.stratType == StrategyType.AAVE_V2 ? a : b;
         }
     }
 
@@ -55,7 +60,7 @@ library YieldUtils {
         YieldVar memory a,
         YieldVar memory b,
         YieldVar memory c
-    ) internal pure returns (YieldVar memory slowest) {
+    ) internal pure returns (YieldVar memory) {
         return getSlowest(getSlowest(a, b), getSlowest(b, c));
     }
 
@@ -63,14 +68,14 @@ library YieldUtils {
     function getFastest(
         YieldVar memory a,
         YieldVar memory b
-    ) internal pure returns (YieldVar memory fastest) {
+    ) internal pure returns (YieldVar memory) {
         if (
             a.stratType == StrategyType.AAVE_V3 ||
             b.stratType == StrategyType.AAVE_V3
         ) {
-            fastest = a.stratType == StrategyType.AAVE_V3 ? a : b;
+            return a.stratType == StrategyType.AAVE_V3 ? a : b;
         } else {
-            fastest = a.stratType == StrategyType.AAVE_V2 ? a : b;
+            return a.stratType == StrategyType.AAVE_V2 ? a : b;
         }
     }
 
@@ -78,25 +83,34 @@ library YieldUtils {
         YieldVar memory a,
         YieldVar memory b,
         YieldVar memory c
-    ) internal pure returns (YieldVar memory slowest) {
+    ) internal pure returns (YieldVar memory) {
         return getFastest(getFastest(a, b), getFastest(b, c));
     }
 
     //add amount while being considerate tolimit
     function deployAmount(
-        YieldVar memory _y,
+        YieldVar[3] memory _y,
+        StrategyType _strat,
+        // YieldVar memory _y,
         uint _amount
-    ) internal view returns (uint _deployedAmount, bool _isHitLimit) {
-        uint _total = _amount + _y.amt;
-        if (_y.limit >= _total) {
-            _y.amt += _amount;
-        } else {
-            _amount = _y.limit - _y.amt;
-            _y.amt = _y.limit;
-            //
-            _y.apr = 0; // send it to lower order
-            _isHitLimit = true;
+    ) internal view returns (uint, bool _isHitLimit) {
+        for (uint i; i < 3; i++) {
+            if (_y[i].stratType == _strat) {
+                uint _total = _amount + _y[i].amt;
+
+                if (_y[i].limit >= _total) {
+                    _y[i].amt += _amount;
+                } else {
+                    _amount = _y[i].limit - _y[i].amt;
+                    _y[i].amt = _y[i].limit;
+                    //
+                    _y[i].apr = 0; // send it to lower order
+                    _isHitLimit = true;
+                }
+                break;
+            }
         }
+
         return (_amount, _isHitLimit);
     }
 
