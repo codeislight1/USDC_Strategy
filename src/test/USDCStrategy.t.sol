@@ -35,7 +35,6 @@ contract USDCStrategyTest is OptimizerSetup {
 
     function setUp() public virtual override {
         super.setUp();
-        // vm.createSelectFork("polygon");
     }
 
     function test_setupStrategyOK() public {

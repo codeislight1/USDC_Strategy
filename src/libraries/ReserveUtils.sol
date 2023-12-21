@@ -8,37 +8,37 @@ import "./AaveUtils.sol";
 import "./YieldUtils.sol";
 
 library ReserveUtils {
-    //
     // update reserve simulating a deposit/withdraw
     function updateVirtualReserve(
         ReservesVars memory _r,
         YieldVar memory _y,
         uint _amount,
-        bool isDeposit
+        bool isDeposit,
+        bool isUpdateAPR
     ) internal view {
-        //
-        // console.log(
-        //     "// updateVirtualReserve: reserveAmt amount isDeposit:",
-        //     _y.amt / 1e6,
-        //     _amount / 1e6,
-        //     isDeposit
-        // );
         if (_y.stratType == StrategyType.COMPOUND) {
             if (isDeposit) _r.c.tS += int256(_amount);
             else _r.c.tS -= int256(_amount);
-
-            _y.apr = CompoundUtils.compAprWrapper(
-                CompoundUtils.amountToSupplyRate(_r.c),
-                true
-            );
+            if (isUpdateAPR) {
+                _y.apr = CompoundUtils.compAprWrapper(
+                    CompoundUtils.amountToSupplyRate(_r.c),
+                    true
+                );
+            }
         } else if (_y.stratType == StrategyType.AAVE_V2) {
-            //
-            _y.apr = uint(AaveUtils.getApr(_r.v2, int256(_amount), isDeposit));
+            if (isUpdateAPR) {
+                _y.apr = uint(
+                    AaveUtils.getApr(_r.v2, int256(_amount), isDeposit)
+                );
+            }
             if (isDeposit) _r.v2.aL += int256(_amount);
             else _r.v2.aL -= int256(_amount);
         } else if (_y.stratType == StrategyType.AAVE_V3) {
-            //
-            _y.apr = uint(AaveUtils.getApr(_r.v3, int256(_amount), isDeposit));
+            if (isUpdateAPR) {
+                _y.apr = uint(
+                    AaveUtils.getApr(_r.v3, int256(_amount), isDeposit)
+                );
+            }
             if (isDeposit) _r.v3.aL += int256(_amount);
             else _r.v3.aL -= int256(_amount);
         }
@@ -59,8 +59,17 @@ library ReserveUtils {
             _a >= _amount ? _amount : _a
         );
         _amount -= _deployedAmount;
-        updateVirtualReserve(_r, _from, _deployedAmount, _isDeposit);
+        console.log("1apr post0", _y[0].apr);
+        console.log("1apr post1", _y[1].apr);
+        console.log("1apr post2", _y[2].apr);
+        updateVirtualReserve(_r, _from, _deployedAmount, _isDeposit, !_isLimit);
+        console.log("2apr post0", _y[0].apr);
+        console.log("2apr post1", _y[1].apr);
+        console.log("2apr post2", _y[2].apr);
         YieldUtils.orderYields(_y);
+        console.log("3apr post0", _y[0].apr);
+        console.log("3apr post1", _y[1].apr);
+        console.log("3apr post2", _y[2].apr);
         _amt = _amount;
     }
 

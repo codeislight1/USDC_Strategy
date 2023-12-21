@@ -167,8 +167,7 @@ contract StrategyCore {
         StrategyType _strat,
         uint _amount
     ) internal view returns (uint amt) {
-        // console.log("## ALLOCATE 1", _amount / 1e6, uint(y.stratType));
-        // console.log("adjust 1", _amount / 1e6);
+        console.log("## ADJUST 1", _amount / 1e6, uint(_strat));
         (amt, ) = _y.deployAmount(_strat, _amount);
     }
 
@@ -178,8 +177,7 @@ contract StrategyCore {
         uint _amt,
         bool _isDeposit
     ) internal view returns (uint _amount) {
-        //
-        // console.log("adjust 2", _amt / 1e6);
+        console.log("### ADJUST 2", _amt / 1e6);
         _amount = _amt;
         bool _isBreak;
         while (_amount != 0 && !_isBreak) {
@@ -231,9 +229,8 @@ contract StrategyCore {
         uint _amt,
         bool _isDeposit
     ) internal view returns (uint _amount) {
-        //
         _amount = _amt;
-        // console.log("adjust 3", _amount / 1e6);
+        console.log("### ADJUST 3", _amount / 1e6);
         bool _isBreak = false;
         while (_amount != 0 && !_isBreak) {
             if (_amount <= MINIMUM) {
@@ -308,7 +305,7 @@ contract StrategyCore {
                     YieldVar memory chosen = _isDeposit
                         ? y[0].getSlowest(y[1])
                         : y[1].getFastest(y[2]);
-                    uint _l = _a0 < _a1 ? _a0 : _a1;
+                    uint _l = _a0.min(_a1);
                     uint _portion = _l / 2;
                     if (_portion == 0) _portion = _l;
 
@@ -323,7 +320,7 @@ contract StrategyCore {
                 } else {
                     // console.log("3CHECK 2_3", _amount);
                     // console.log("ALLOC3 CHECK 2_3", _amount / 1e6);
-                    uint _l = _a0 < _a1 ? _a0 : _a1;
+                    uint _l = _a0.min(_a1);
                     uint _third = _amount.min(_l) / 2;
 
                     if (_third == 0) _third = _l;
