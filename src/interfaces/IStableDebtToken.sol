@@ -6,4 +6,9 @@ interface IStableDebtToken {
         external
         view
         returns (uint256, uint256);
+
+    function getSupplyData()
+        external
+        view
+        returns (uint256, uint256, uint256, uint40);
 }

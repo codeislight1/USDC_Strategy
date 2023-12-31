@@ -70,4 +70,8 @@ interface IAaveV3 {
     function getReserveData(
         address asset
     ) external view returns (ReserveData memory);
+
+    function getReserveNormalizedIncome(
+        address asset
+    ) external view returns (uint256);
 }

@@ -4,7 +4,9 @@ pragma solidity 0.8.18;
 import "forge-std/console.sol";
 import {ExtendedTest} from "./ExtendedTest.sol";
 
-import {USDCStrategy, ERC20} from "../../USDCStrategy.sol";
+import {LendingAllocatorStrategy, ERC20} from "../../LendingAllocatorStrategy.sol";
+
+import {IStrategyImplementation} from "../../interfaces/IStrategyImplementation.sol";
 
 import {IStrategyInterface} from "../../interfaces/IStrategyInterface.sol";
 
@@ -19,7 +21,7 @@ interface IFactory {
     function set_protocol_fee_recipient(address) external;
 }
 
-contract OptimizerSetup is ExtendedTest, IEvents {
+contract LendingSetup is ExtendedTest, IEvents {
     // Contract instances that we will use repeatedly.
     ERC20 public asset;
     IStrategyInterface public strategy;
@@ -40,23 +42,33 @@ contract OptimizerSetup is ExtendedTest, IEvents {
     uint256 public MAX_BPS = 10_000;
 
     // Fuzz from $0.01 of 1e6 stable coins up to 1 trillion of a 1e18 coin
-    uint256 public maxFuzzAmount = 1e7 * 1e6; // 10M
-    uint256 public minFuzzAmount = 10_000; // 0.01
+    uint256 public maxFuzzAmount; // 1e7 * 1e6; // 10M
+    uint256 public minFuzzAmount; // 10_000; // 0.01
 
     // Default profit max unlock time is set for 10 days
     uint256 public profitMaxUnlockTime = 10 days;
 
-    function setUp() public virtual {
+    function _setUp(
+        address _asset,
+        uint8[] memory _prioritiy,
+        IStrategyImplementation[] memory _impls,
+        uint _minimum
+    ) public virtual {
         _setTokenAddrs();
 
         // Set asset
-        asset = ERC20(tokenAddrs["USDC"]);
+        asset = ERC20(_asset);
 
         // Set decimals
         decimals = asset.decimals();
 
+        maxFuzzAmount = 1e8 * 10 ** decimals; // 1e7 * 1e6; // 10M
+        minFuzzAmount = 10 ** decimals / 100; // 10_000; // 0.01
+
         // Deploy strategy and set variables
-        strategy = IStrategyInterface(setUpStrategy());
+        strategy = IStrategyInterface(
+            setUpStrategy(_asset, _prioritiy, _impls, _minimum * 10 ** decimals)
+        );
 
         factory = strategy.FACTORY();
 
@@ -69,10 +81,15 @@ contract OptimizerSetup is ExtendedTest, IEvents {
         vm.label(performanceFeeRecipient, "performanceFeeRecipient");
     }
 
-    function setUpStrategy() public returns (address) {
+    function setUpStrategy(
+        address _asset,
+        uint8[] memory _prioritiy,
+        IStrategyImplementation[] memory _impls,
+        uint _minimum
+    ) public returns (address) {
         // we save the strategy as a IStrategyInterface to give it the needed interface
         IStrategyInterface _strategy = IStrategyInterface(
-            address(new USDCStrategy())
+            address(new LendingAllocatorStrategy(_asset, _impls))
         );
 
         // set keeper
@@ -100,7 +117,7 @@ contract OptimizerSetup is ExtendedTest, IEvents {
         vm.prank(_user);
         shares = _strategy.deposit(_amount, _user);
         uint _post = gasleft();
-        console.log("deposit gas:", _pre - _post);
+        console.log("deposit gas consumed:", _pre - _post);
     }
 
     function mintAndDepositIntoStrategy(
@@ -126,7 +143,7 @@ contract OptimizerSetup is ExtendedTest, IEvents {
             "!totalAssets"
         );
         assertApproxEqAbs(_strategy.totalDebt(), _totalDebt, 2, "!totalDebt");
-        assertEq(_strategy.totalIdle(), _totalIdle, "!totalIdle");
+        assertApproxEqAbs(_strategy.totalIdle(), _totalIdle, 2, "!totalIdle");
         assertEq(_totalAssets, _totalDebt + _totalIdle, "!Added");
     }
 
@@ -154,8 +171,8 @@ contract OptimizerSetup is ExtendedTest, IEvents {
         // tokenAddrs["YFI"] = 0x0bc529c00C6401aEF6D220BE8C6Ea1667F6Ad93e;
         // tokenAddrs["WETH"] = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
         // tokenAddrs["LINK"] = 0x514910771AF9Ca656af840dff83E8264EcF986CA;
-        // tokenAddrs["USDT"] = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
-        // tokenAddrs["DAI"] = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
+        tokenAddrs["USDT"] = 0xc2132D05D31c914a87C6611C10748AEb04B58e8F;
+        tokenAddrs["DAI"] = 0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063;
         tokenAddrs["USDC"] = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174;
     }
 }

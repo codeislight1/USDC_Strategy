@@ -6,15 +6,15 @@ import "forge-std/console.sol";
 
 library YieldUtils {
     //
-    function orderYields(YieldVar[3] memory y) internal view {
+    function orderYields(YieldVars[3] memory y) internal view {
         if (y[1].apr < y[2].apr) (y[1], y[2]) = (y[2], y[1]);
         if (y[0].apr < y[1].apr) (y[0], y[1]) = (y[1], y[0]);
         if (y[1].apr < y[2].apr) (y[1], y[2]) = (y[2], y[1]);
         console.log(
-            "## yields types ##",
-            uint(y[0].stratType),
-            uint(y[1].stratType),
-            uint(y[2].stratType)
+            "## yields id ##",
+            uint(y[0].id),
+            uint(y[1].id),
+            uint(y[2].id)
         );
         console.log(
             "## yields ordered ##",
@@ -25,9 +25,9 @@ library YieldUtils {
     }
 
     function findLiquidMarket(
-        YieldVar[3] memory y,
+        YieldVars[3] memory y,
         uint _amount
-    ) internal view returns (YieldVar memory _y) {
+    ) internal pure returns (YieldVars memory _y) {
         // console.log("findLiquid amount", _amount);
         // console.log("dump 0", uint(y[0].stratType), y[0].amt, y[0].apr);
         // console.log("dump 1", uint(y[1].stratType), y[1].amt, y[1].apr);
@@ -43,88 +43,82 @@ library YieldUtils {
 
     // order slower to fastest: C,v2,v3
     function getSlowest(
-        YieldVar memory a,
-        YieldVar memory b
-    ) internal pure returns (YieldVar memory) {
-        if (
-            a.stratType == StrategyType.COMPOUND ||
-            b.stratType == StrategyType.COMPOUND
-        ) {
-            return a.stratType == StrategyType.COMPOUND ? a : b;
-        } else {
-            return a.stratType == StrategyType.AAVE_V2 ? a : b;
-        }
+        YieldVars memory a,
+        YieldVars memory b,
+        uint priority // index => priority
+    ) internal pure returns (YieldVars memory) {
+        uint _a = (priority >> (BYTE * a.id)) & BYTE;
+        uint _b = (priority >> (BYTE * b.id)) & BYTE;
+        return _a > _b ? b : a;
     }
 
     function getSlowest(
-        YieldVar memory a,
-        YieldVar memory b,
-        YieldVar memory c
-    ) internal pure returns (YieldVar memory) {
-        return getSlowest(getSlowest(a, b), getSlowest(b, c));
+        YieldVars memory a,
+        YieldVars memory b,
+        YieldVars memory c,
+        uint priority
+    ) internal pure returns (YieldVars memory) {
+        uint _a = (priority >> (BYTE * a.id)) & BYTE;
+        uint _b = (priority >> (BYTE * b.id)) & BYTE;
+        uint _c = (priority >> (BYTE * c.id)) & BYTE;
+        (YieldVars memory slowest, uint slowestOrder) = _a < _b
+            ? (a, _a)
+            : (b, _b);
+        slowest = slowestOrder < _c ? slowest : c;
+        return slowest;
     }
 
     // order slower to fastest: C,v2,v3
     function getFastest(
-        YieldVar memory a,
-        YieldVar memory b
-    ) internal pure returns (YieldVar memory) {
-        if (
-            a.stratType == StrategyType.AAVE_V3 ||
-            b.stratType == StrategyType.AAVE_V3
-        ) {
-            return a.stratType == StrategyType.AAVE_V3 ? a : b;
-        } else {
-            return a.stratType == StrategyType.AAVE_V2 ? a : b;
-        }
+        YieldVars memory a,
+        YieldVars memory b,
+        uint priority
+    ) internal pure returns (YieldVars memory) {
+        uint _a = (priority >> (BYTE * a.id)) & BYTE;
+        uint _b = (priority >> (BYTE * b.id)) & BYTE;
+        return _a < _b ? b : a;
     }
 
     function getFastest(
-        YieldVar memory a,
-        YieldVar memory b,
-        YieldVar memory c
-    ) internal pure returns (YieldVar memory) {
-        return getFastest(getFastest(a, b), getFastest(b, c));
+        YieldVars memory a,
+        YieldVars memory b,
+        YieldVars memory c,
+        uint priority
+    ) internal pure returns (YieldVars memory) {
+        uint _a = (priority >> (BYTE * a.id)) & BYTE;
+        uint _b = (priority >> (BYTE * b.id)) & BYTE;
+        uint _c = (priority >> (BYTE * c.id)) & BYTE;
+        (YieldVars memory fastest, uint fastestOrder) = _a > _b
+            ? (a, _a)
+            : (b, _b);
+        fastest = fastestOrder > _c ? fastest : c;
+        return fastest;
+    }
+
+    function getTotalAmounts(
+        YieldVars[3] memory y
+    ) internal pure returns (uint total) {
+        for (uint i; i < 3; i++) {
+            total += y[i].amt;
+        }
     }
 
     //add amount while being considerate tolimit
     function deployAmount(
-        YieldVar[3] memory _y,
-        StrategyType _strat,
-        // YieldVar memory _y,
+        YieldVars memory _y,
         uint _amount
-    ) internal view returns (uint, bool _isHitLimit) {
-        for (uint i; i < 3; i++) {
-            if (_y[i].stratType == _strat) {
-                uint _total = _amount + _y[i].amt;
+    ) internal pure returns (uint, bool _isHitLimit) {
+        uint _total = _amount + _y.amt;
 
-                if (_y[i].limit >= _total) {
-                    _y[i].amt += _amount;
-                } else {
-                    _amount = _y[i].limit - _y[i].amt;
-                    _y[i].amt = _y[i].limit;
-                    //
-                    _y[i].apr = 0; // send it to lower order
-                    _isHitLimit = true;
-                }
-                break;
-            }
+        if (_y.limit >= _total) {
+            _y.amt += _amount;
+        } else {
+            _amount = _y.limit - _y.amt;
+            _y.amt = _y.limit;
+            _y.apr = 0; // send it to lower order
+            _isHitLimit = true;
         }
 
         return (_amount, _isHitLimit);
-    }
-
-    function getMarkets(
-        YieldVar[3] memory y
-    )
-        internal
-        pure
-        returns (YieldVar memory c, YieldVar memory v2, YieldVar memory v3)
-    {
-        for (uint i; i < 3; i++) {
-            if (y[i].stratType == StrategyType.COMPOUND) c = y[i];
-            else if (y[i].stratType == StrategyType.AAVE_V2) v2 = y[i];
-            else if (y[i].stratType == StrategyType.AAVE_V3) v3 = y[i];
-        }
     }
 }

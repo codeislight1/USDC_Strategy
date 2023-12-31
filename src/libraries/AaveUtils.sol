@@ -84,14 +84,28 @@ library AaveUtils {
         return overallBorrowRate;
     }
 
+    function calculateLinearInterest(
+        uint256 rate,
+        uint40 lastUpdateTimestamp
+    ) internal view returns (uint256) {
+        //solium-disable-next-line
+        uint256 result = rate *
+            (block.timestamp - uint256(lastUpdateTimestamp));
+        unchecked {
+            result = result / SECONDS_PER_YEAR;
+        }
+        return RAY + result;
+    }
+
     function getAmount(
         AaveVars memory v,
         bool isUgtOPT,
         int lr // liquidity rate
-    ) internal pure returns (int) {
-        int u;
+    ) internal view returns (int) {
         int iR = int(R);
         int iRa = int(RAY);
+        int _b;
+        int _4c;
         // eqn = ( -b + math.sqrt(b**2+4*c) ) / 2*
 
         // aave:
@@ -103,48 +117,47 @@ library AaveUtils {
         // c4= exc/vrs2
         // c5= base + 0.5 +RAY/(2*opt)
         // c6= opt/vrs1
+
         if (isUgtOPT) {
             // _b1= c4*(c3+c0*c1)-opt
             // _c1= c0*c2*c4
-            int _b = ((v.base +
-                v.vrs1 +
-                (iR *
-                    v.tVD *
-                    (iRa + v.vrs2) +
-                    iRa *
-                    (iR * (v.tD + 2 * v.tSD * v.avgSBR) + 2 * iRa)) /
-                (iRa * v.tVD * 2 * iR)) * v.exc) /
+
+            _b =
+                ((v.base +
+                    (iRa + v.vrs2 + v.vrs1 * iRa * 2) /
+                    (iRa * 2) +
+                    (iR * (v.tD + 2 * v.tSD * v.avgSBR) + 2 * iRa) /
+                    (v.tVD * 2 * iR)) * v.exc) /
                 v.vrs2 -
                 v.opt;
 
-            // int _4c = ((v.tVD * iR + 2 * iRa + 2 * iR * v.tSD * v.avgSBR) *
-            // (4 * v.opt)) / (v.tVD * v.vrs1 * 2e9);
-            int _4c = ((((((PERCENT_FACTOR * (2 * lr - 1) - v.subFactor) *
-                2 *
-                v.tD) / v.tVD) * v.exc) / v.vrs2) * iRa) / v.subFactor;
-            int _sqrt = int(MathUtils.sqrt(MathUtils.abs((_b ** 2 + _4c))));
-            u = (-_b + _sqrt) / 2;
+            _4c =
+                ((((((PERCENT_FACTOR * (2 * lr - 1) - v.subFactor) * 2 * v.tD) /
+                    v.tVD) * v.exc) / v.vrs2) * iRa) /
+                v.subFactor;
         } else {
             // _b2= c6*(c5+c0*c1)
             // _c2= c0*c2*c6
-            int _b = ((v.base +
-                (v.tVD +
-                    ((2 * v.tVD * iRa) / v.opt) +
-                    ((2 * iRa) / iR) +
-                    v.tD +
-                    2 *
-                    v.tSD *
-                    v.avgSBR) /
-                (2 * v.tVD)) * v.opt) / v.vrs1;
-
-            int _4c = ((((((PERCENT_FACTOR * (2 * lr - 1) - v.subFactor) *
-                2 *
-                v.tD) / v.tVD) * v.opt) / v.vrs1) * iRa) / v.subFactor;
-
-            int _sqrt = int(MathUtils.sqrt(MathUtils.abs((_b ** 2 + _4c))));
-
-            u = (-_b + _sqrt) / 2;
+            _b =
+                ((v.base +
+                    (v.tVD +
+                        ((2 * v.tVD * iRa) / v.opt) +
+                        ((2 * iRa) / iR) +
+                        v.tD +
+                        2 *
+                        v.tSD *
+                        v.avgSBR) /
+                    (2 * v.tVD)) * v.opt) /
+                v.vrs1;
+            _4c =
+                ((((((PERCENT_FACTOR * (2 * lr - 1) - v.subFactor) * 2 * v.tD) /
+                    v.tVD) * v.opt) / v.vrs1) * iRa) /
+                v.subFactor;
         }
+        int _sqrt = int(MathUtils.sqrt(MathUtils.abs((_b ** 2 + _4c))));
+
+        int u = (-_b + _sqrt) / 2;
+
         return (v.tD * iRa) / u - (v.aL + v.tD);
     }
 
@@ -152,7 +165,7 @@ library AaveUtils {
         AaveVars memory v,
         int _apr,
         bool _isDeposit
-    ) public pure returns (uint _amount) {
+    ) public view returns (uint _amount) {
         int _amount0 = int(MathUtils.abs(getAmount(v, true, _apr)));
         int _amount1 = int(MathUtils.abs(getAmount(v, false, _apr)));
         int sr0 = getApr(v, _amount0, _isDeposit);
